@@ -1,0 +1,8 @@
+export const Roles = Object.freeze({
+  ADMIN: "ADMIN",
+  RADIOLOGIST: "RADIOLOGIST",
+  PHYSICIAN: "PHYSICIAN",
+  ANALYST: "ANALYST",
+  TECHNICIAN: "TECHNICIAN",
+  VIEWER: "VIEWER",
+});

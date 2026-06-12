@@ -1,0 +1,40 @@
+name: MedVision CI
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+
+jobs:
+  quality-gate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          pip install -r backend/requirements.txt
+          pip install ruff black
+
+      - name: Ruff lint (PEP8)
+        run: ruff check backend
+        env:
+          PYTHONPATH: .
+
+      - name: Black format check
+        run: black --check backend
+        env:
+          PYTHONPATH: .
+
+      - name: Pytest
+        run: pytest
+        env:
+          PYTHONPATH: .
+          DATABASE_URL: sqlite+pysqlite:///:memory:
+          JWT_SECRET_KEY: test-secret
+          SECRET_KEY: test-secret

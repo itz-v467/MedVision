@@ -1,0 +1,17 @@
+# Optional ML dependencies for Phase 2 (install after requirements.txt)
+torch>=2.0.0
+torchxrayvision>=1.2.0
+torchvision>=0.15.0
+scikit-image>=0.22.0
+opencv-python-headless>=4.8.0
+pdfplumber>=0.11.0
+pytesseract>=0.3.10
+sentence-transformers>=2.7.0
+openai>=1.40.0
+google-genai>=0.2.2
+qdrant-client>=1.11.0
+langgraph>=0.2.16
+langchain-core>=0.2.35
+pydicom>=2.4.4
+camelot-py[cv]>=0.11.0
+paddleocr>=2.8.1
