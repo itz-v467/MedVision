@@ -6,9 +6,9 @@ logger = logging.getLogger(__name__)
 
 class GeminiClient:
     def __init__(self):
-        api_key = os.getenv("GEMINI_API_KEY")
-        if not api_key:
-            logger.warning("GEMINI_API_KEY is not set.")
+        api_key = os.getenv("GEMINI_API_KEY") or "dummy_key"
+        if api_key == "dummy_key":
+            logger.warning("GEMINI_API_KEY is not set. Using dummy key for initialization.")
         
         self.client = genai.Client(api_key=api_key)
 
