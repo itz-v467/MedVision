@@ -28,15 +28,40 @@ class MultimodalCorrelationService(BaseService):
         imaging_score = modalities.get("imaging_confidence", 0.0)
         ocr_score = modalities.get("ocr_confidence", 0.0)
         nlp_score = modalities.get("nlp_confidence", 0.0)
-        weighted_score = (imaging_score * 0.5) + (ocr_score * 0.25) + (nlp_score * 0.25)
+        imaging_skipped = modalities.get("imaging_skipped", False)
+        file_type = modalities.get("file_type", "")
+
+        if imaging_skipped or file_type in {"lab_report", "clinical_note"}:
+            weighted_score = (ocr_score * 0.65) + (nlp_score * 0.35)
+            correlations = []
+            if ocr_score > 0:
+                correlations.append(
+                    {
+                        "type": "lab_ocr",
+                        "description": "Lab values and report text extracted via OCR",
+                        "weight": round(ocr_score, 2),
+                    }
+                )
+            if nlp_score > 0:
+                correlations.append(
+                    {
+                        "type": "clinical_nlp",
+                        "description": "Clinical entities mapped from report text",
+                        "weight": round(nlp_score, 2),
+                    }
+                )
+        else:
+            weighted_score = (imaging_score * 0.5) + (ocr_score * 0.25) + (nlp_score * 0.25)
+            correlations = [
+                {
+                    "type": "imaging_lab",
+                    "description": "Imaging findings correlated with available clinical data",
+                    "weight": round(weighted_score, 2),
+                }
+            ]
+
         return {
             "encounter_id": str(encounter_id),
             "weighted_evidence_score": round(weighted_score, 4),
-            "correlations": [
-                {
-                    "type": "imaging_lab",
-                    "description": "Opacity aligns with inflammatory markers",
-                    "weight": 0.72,
-                }
-            ],
+            "correlations": correlations,
         }

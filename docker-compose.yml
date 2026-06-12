@@ -36,11 +36,14 @@ services:
       REDIS_URL: redis://redis:6379/0
       JWT_SECRET_KEY: dev-jwt-secret-change-in-production
       SECRET_KEY: dev-secret-key
-      CORS_ORIGINS: http://localhost:5173
+      CORS_ORIGINS: http://localhost:5173,http://localhost:8080
       STORAGE_PATH: /data/uploads
+      LOG_LEVEL: DEBUG
+      KMP_DUPLICATE_LIB_OK: "TRUE"
     ports:
       - "5000:5000"
     volumes:
+      - ./backend:/app/backend
       - ./backend/logs:/app/backend/logs
       - upload_data:/data/uploads
     depends_on:

@@ -1,18 +1,42 @@
-import { useState } from "react";
-import { BarVolumeChart } from "../charts/BarVolumeChart";
-import { DoughnutAbnormalityChart } from "../charts/DoughnutAbnormalityChart";
-import { LinePredictionsChart } from "../charts/LinePredictionsChart";
-import { ScatterConfidenceChart } from "../charts/ScatterConfidenceChart";
-import { ErrorBanner } from "../components/ErrorBanner";
-import { StatCard } from "../components/StatCard";
+import { useCallback, useEffect, useState } from "react";
 import { useDashboardData } from "../hooks/useDashboardData";
-import { AlertsTable } from "../tables/AlertsTable";
 import { clinicalApi } from "../api/clinicalApi";
+import { ErrorBanner } from "../components/ErrorBanner";
+import { ClinicalWorkspace } from "../components/workspace/ClinicalWorkspace";
+import { usePermissions } from "../hooks/usePermissions";
+import { BarVolumeChart } from "../charts/BarVolumeChart";
+import { LinePredictionsChart } from "../charts/LinePredictionsChart";
 
 export function DashboardPage() {
-  const { loading, error, dashboard, charts, alerts, aiPerformance, retry } =
-    useDashboardData();
+  const { loading, error, authExpired, dashboard, charts, alerts, retry } = useDashboardData();
+  const { canUpload } = usePermissions();
+  const [encounters, setEncounters] = useState([]);
+  const [encountersLoading, setEncountersLoading] = useState(true);
+  const [encountersError, setEncountersError] = useState("");
+  const [encountersAuthExpired, setEncountersAuthExpired] = useState(false);
   const [acknowledgingId, setAcknowledgingId] = useState(null);
+
+  const loadEncounters = useCallback(async () => {
+    setEncountersLoading(true);
+    setEncountersError("");
+    setEncountersAuthExpired(false);
+    try {
+      const data = await clinicalApi.encounters();
+      setEncounters(data.encounters || []);
+    } catch (err) {
+      setEncounters([]);
+      if (err?.authExpired || err?.status === 401) {
+        setEncountersAuthExpired(true);
+        setEncountersError(err.message);
+      }
+    } finally {
+      setEncountersLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadEncounters();
+  }, [loadEncounters]);
 
   const handleAcknowledge = async (alertId) => {
     setAcknowledgingId(alertId);
@@ -24,72 +48,54 @@ export function DashboardPage() {
     }
   };
 
+  const handleRetryAll = () => {
+    retry();
+    loadEncounters();
+  };
+
+  const pageLoading = loading || encountersLoading;
+  const showError = error || encountersError;
+  const isAuthError = authExpired || encountersAuthExpired;
+
   return (
     <div>
-      <header className="page-header">
-        <h2>Enterprise Clinical Dashboard</h2>
-        <p>Live AI operations, triage, and compliance monitoring</p>
-      </header>
+      <ErrorBanner
+        message={showError}
+        onRetry={isAuthError ? undefined : handleRetryAll}
+        authExpired={isAuthError}
+      />
 
-      <ErrorBanner message={error} onRetry={retry} />
+      <ClinicalWorkspace
+        loading={pageLoading}
+        encounters={encounters}
+        alerts={alerts}
+        pendingReviews={dashboard?.pending_reviews ?? 0}
+        onAcknowledge={handleAcknowledge}
+        acknowledgingId={acknowledgingId}
+        canUpload={canUpload}
+      />
 
-      <section className="stats-grid">
-        <StatCard label="Patients" value={dashboard?.patients} />
-        <StatCard label="Encounters" value={dashboard?.encounters} />
-        <StatCard label="Active Alerts" value={dashboard?.active_alerts} />
-        <StatCard label="AI Analyses" value={dashboard?.ai_analyses} />
-      </section>
-
-      <section className="performance-strip">
-        <StatCard
-          label="Avg Confidence"
-          value={aiPerformance?.avg_confidence?.toFixed(2)}
-        />
-        <StatCard
-          label="Avg Latency (ms)"
-          value={aiPerformance?.avg_latency_ms?.toFixed(0)}
-        />
-      </section>
-
-      <section className="charts-grid">
-        <article>
-          <h3>Daily Predictions</h3>
-          <LinePredictionsChart
-            data={charts?.daily_predictions}
-            loading={loading}
-          />
-        </article>
-        <article>
-          <h3>Weekly Analysis Volume</h3>
-          <BarVolumeChart
-            data={charts?.weekly_analysis_volume}
-            loading={loading}
-          />
-        </article>
-        <article>
-          <h3>Abnormality Distribution</h3>
-          <DoughnutAbnormalityChart
-            data={charts?.abnormality_distribution}
-            loading={loading}
-          />
-        </article>
-        <article>
-          <h3>Model Confidence Scatter</h3>
-          <ScatterConfidenceChart
-            data={charts?.model_confidence_scatter}
-            loading={loading}
-          />
-        </article>
-      </section>
-
-      <section className="panel">
-        <h3>Critical Alerts</h3>
-        <AlertsTable
-          alerts={alerts}
-          onAcknowledge={handleAcknowledge}
-          acknowledgingId={acknowledgingId}
-        />
-      </section>
+      <details className="cv-analytics-fold cv-panel cv-panel-pad" style={{ marginTop: "var(--cv-space-4)" }}>
+        <summary>Operations analytics</summary>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: "var(--cv-space-3)", marginTop: "var(--cv-space-3)" }}>
+          <div>
+            <h4 style={{ margin: "0 0 8px", fontSize: "var(--cv-text-sm)", color: "var(--cv-slate-500)" }}>Daily predictions</h4>
+            {pageLoading ? (
+              <div className="cv-skeleton" style={{ height: 180 }} />
+            ) : (
+              <LinePredictionsChart data={charts?.daily_predictions} loading={pageLoading} />
+            )}
+          </div>
+          <div>
+            <h4 style={{ margin: "0 0 8px", fontSize: "var(--cv-text-sm)", color: "var(--cv-slate-500)" }}>Weekly volume</h4>
+            {pageLoading ? (
+              <div className="cv-skeleton" style={{ height: 180 }} />
+            ) : (
+              <BarVolumeChart data={charts?.weekly_analysis_volume} loading={pageLoading} />
+            )}
+          </div>
+        </div>
+      </details>
     </div>
   );
 }

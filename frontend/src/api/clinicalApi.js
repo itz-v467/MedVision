@@ -6,4 +6,7 @@ export const clinicalApi = {
   getEncounter: ClinicalService.getEncounter,
   finalizeSummary: ClinicalService.finalizeSummary,
   acknowledgeAlert: ClinicalService.acknowledgeAlert,
+  deleteEncounter: ClinicalService.deleteEncounter,
+  searchPatients: ClinicalService.searchPatients,
+  previewPatientId: ClinicalService.previewPatientId,
 };

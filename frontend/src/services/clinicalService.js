@@ -27,4 +27,19 @@ export class ClinicalService {
       method: "POST",
     });
   }
+
+  static deleteEncounter(encounterId) {
+    return HttpClient.request(`/api/clinical/encounters/${encounterId}`, {
+      method: "DELETE",
+    });
+  }
+
+  static searchPatients(query, limit = 10) {
+    const params = new URLSearchParams({ q: query, limit: String(limit) });
+    return HttpClient.request(`/api/clinical/patients/search?${params}`);
+  }
+
+  static previewPatientId() {
+    return HttpClient.request("/api/clinical/patients/preview-id");
+  }
 }

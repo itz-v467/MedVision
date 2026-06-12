@@ -13,6 +13,7 @@ from backend.model.document_model import (
     AlertModel,
     InferenceResultModel,
 )
+from backend.enums.ai_status import AiProcessingStatus
 from backend.model.encounter_model import EncounterModel
 from backend.model.patient_model import PatientModel
 
@@ -35,10 +36,17 @@ class StatsDao(BaseDao):
         inference_count = (
             self._session.query(func.count(InferenceResultModel.id)).scalar() or 0
         )
+        pending_review_count = (
+            self._session.query(func.count(EncounterModel.id))
+            .filter(EncounterModel.status == AiProcessingStatus.REVIEW_REQUIRED.value)
+            .scalar()
+            or 0
+        )
         return {
             "patients": int(patient_count),
             "encounters": int(encounter_count),
             "active_alerts": int(alert_count),
+            "pending_reviews": int(pending_review_count),
             "ai_analyses": int(inference_count),
         }
 

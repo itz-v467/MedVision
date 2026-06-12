@@ -5,7 +5,9 @@ from __future__ import annotations
 import uuid
 
 from backend.core.base_dao import BaseDao
+from backend.enums.ai_status import AiProcessingStatus
 from backend.model.encounter_model import EncounterModel
+from backend.model.patient_model import PatientModel
 
 
 class EncounterDao(BaseDao):
@@ -23,6 +25,20 @@ class EncounterDao(BaseDao):
         """Return recent encounters for triage queue."""
         return (
             self._session.query(EncounterModel)
+            .filter(EncounterModel.status != AiProcessingStatus.DELETED.value)
+            .order_by(EncounterModel.created_at.desc())
+            .limit(limit)
+            .all()
+        )
+
+    def list_recent_with_patient(
+        self, limit: int = 50
+    ) -> list[tuple[EncounterModel, PatientModel | None]]:
+        """Return recent encounters joined with patient details."""
+        return (
+            self._session.query(EncounterModel, PatientModel)
+            .outerjoin(PatientModel, EncounterModel.patient_id == PatientModel.id)
+            .filter(EncounterModel.status != AiProcessingStatus.DELETED.value)
             .order_by(EncounterModel.created_at.desc())
             .limit(limit)
             .all()

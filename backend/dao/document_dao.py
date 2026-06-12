@@ -82,6 +82,15 @@ class DocumentDao(BaseDao):
             .first()
         )
 
+    def find_ocr_by_document(self, document_id: uuid.UUID) -> OcrResultModel | None:
+        """Return OCR result for a document."""
+        return (
+            self._session.query(OcrResultModel)
+            .filter(OcrResultModel.document_id == document_id)
+            .order_by(OcrResultModel.created_at.desc())
+            .first()
+        )
+
     def find_ocr_by_encounter(self, encounter_id: uuid.UUID) -> OcrResultModel | None:
         """Return latest OCR result for an encounter."""
         return (

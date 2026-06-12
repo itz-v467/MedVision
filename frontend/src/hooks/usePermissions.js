@@ -15,7 +15,6 @@ export function usePermissions() {
         Roles.PHYSICIAN,
         Roles.TECHNICIAN,
       ].includes(role),
-      canViewAudit: role === Roles.ADMIN,
       canReview: [Roles.ADMIN, Roles.PHYSICIAN, Roles.RADIOLOGIST].includes(role),
     };
   }, [user]);

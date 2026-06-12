@@ -4,6 +4,8 @@ import { BrowserRouter } from "react-router-dom";
 import { AuthProvider } from "./context/AuthContext";
 import { AppRoutes } from "./routes/AppRoutes";
 import "./styles/global.css";
+import "./styles/clinical-design-system.css";
+import "./styles/medvision-sidebar.css";
 
 ReactDOM.createRoot(document.getElementById("root")).render(
   <React.StrictMode>

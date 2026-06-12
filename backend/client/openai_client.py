@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from typing import Any
 
 from backend.config import get_settings
@@ -40,6 +41,31 @@ class OpenAiClient(SingletonMixin):
         from openai import OpenAI
 
         self._client = OpenAI(api_key=self._settings.openai_api_key)
+
+    def extract_structured_json(
+        self,
+        system_prompt: str,
+        user_prompt: str,
+        *,
+        max_tokens: int = 1500,
+    ) -> Any:
+        """Return parsed JSON from a chat completion (requires API key)."""
+        if not self.is_enabled:
+            raise RuntimeError("OpenAI API key is not configured.")
+
+        self._ensure_client()
+        response = self._client.chat.completions.create(
+            model=self._settings.openai_llm_model,
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ],
+            temperature=0.0,
+            max_tokens=max_tokens,
+            response_format={"type": "json_object"},
+        )
+        content = response.choices[0].message.content or "{}"
+        return json.loads(content)
 
     def generate_summary(
         self,
@@ -105,25 +131,52 @@ class OpenAiClient(SingletonMixin):
         grounded_chunks: list[dict[str, Any]],
     ) -> str:
         """Template summary when OpenAI is unavailable."""
+        file_type = context.get("file_type", "")
+        is_lab = file_type in {"lab_report", "clinical_note"}
+
         imaging = context.get("imaging", {}).get("findings", {})
         detected = [
             name
             for name, data in imaging.items()
             if isinstance(data, dict) and data.get("detected")
         ]
-        ocr = context.get("ocr", {}).get("structured_data", {})
-        biomarkers = ocr.get("biomarkers", [])
-        nlp_entities = context.get("nlp", {}).get("entities", {})
-        diseases = nlp_entities.get("diseases", [])
+        ocr_data = context.get("ocr", {}).get("structured_data", {})
+        lab_analysis = ocr_data.get("lab_analysis", {})
+        biomarkers = ocr_data.get("biomarkers", [])
+        warning = ocr_data.get("extraction_warning")
+        nlp_entities = context.get("nlp", {}).get("entities", {}) or {}
+        diseases = nlp_entities.get("diseases", []) if isinstance(nlp_entities, dict) else []
 
         parts = ["AI-assisted summary:"]
-        if detected:
-            parts.append(f"Imaging flags: {', '.join(detected)}.")
+        if warning:
+            parts.append(warning)
+        if lab_analysis.get("clinical_summary"):
+            parts.append(lab_analysis["clinical_summary"])
         if biomarkers:
-            marker_names = ", ".join(item.get("name", "") for item in biomarkers[:3])
-            parts.append(f"Lab markers extracted: {marker_names}.")
+            abnormal = [b for b in biomarkers if b.get("is_abnormal")]
+            normal = [b for b in biomarkers if b.get("status") == "normal"]
+            if abnormal:
+                abnormal_details = "; ".join(
+                    f"{b.get('name')}: {b.get('display_value', b.get('value'))} "
+                    f"({b.get('flag', 'ABNORMAL')}) — {b.get('precaution', b.get('interpretation', ''))}"
+                    for b in abnormal[:6]
+                )
+                parts.append(f"Precautions: {abnormal_details}.")
+            if normal and not lab_analysis.get("clinical_summary"):
+                normal_names = ", ".join(b.get("name", "") for b in normal[:8])
+                parts.append(f"Normal results: {normal_names}.")
+            if not abnormal and not normal:
+                marker_details = ", ".join(
+                    f"{item.get('name', '')} {item.get('value', '')} {item.get('unit', '')}".strip()
+                    for item in biomarkers[:5]
+                )
+                parts.append(f"Lab results extracted: {marker_details}.")
+        elif is_lab and not warning:
+            parts.append("Lab report processed but no standard biomarkers were matched.")
         if diseases:
-            parts.append(f"NLP entities include: {', '.join(diseases)}.")
+            parts.append(f"Clinical entities: {', '.join(diseases)}.")
+        if detected and not is_lab:
+            parts.append(f"Imaging flags: {', '.join(detected)}.")
         parts.append("Correlate with clinical presentation.")
         parts.append("Physician review required before finalization.")
         if grounded_chunks:

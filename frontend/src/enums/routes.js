@@ -4,6 +4,5 @@ export const AppRoutes = Object.freeze({
   UPLOAD: "/upload",
   ENCOUNTERS: "/encounters",
   REVIEW: "/review",
-  AUDIT: "/audit",
   ADMIN: "/admin",
 });

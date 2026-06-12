@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import '../styles/workspace.css';
-import PatientTimeline from './PatientTimeline';
+import { PatientTimeline } from '../components/PatientTimeline';
 import EncounterView from './EncounterView';
 import EvidencePanel from './EvidencePanel';
 

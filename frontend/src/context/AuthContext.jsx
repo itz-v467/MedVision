@@ -1,26 +1,35 @@
-import { createContext, useCallback, useMemo, useState } from "react";
+import { createContext, useCallback, useEffect, useMemo, useState } from "react";
 import { authApi } from "../api/authApi";
+import {
+  clearSession,
+  getStoredUser,
+  hasActiveSession,
+  onSessionExpired,
+  saveSession,
+} from "../services/authSession";
 
 export const AuthContext = createContext(null);
 
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(() => {
-    try {
-      const raw = localStorage.getItem("user");
-      return raw ? JSON.parse(raw) : null;
-    } catch {
-      localStorage.removeItem("user");
-      localStorage.removeItem("access_token");
-      localStorage.removeItem("refresh_token");
+    if (!hasActiveSession()) {
+      clearSession();
       return null;
     }
+    return getStoredUser();
   });
+
+  useEffect(() => {
+    onSessionExpired(() => setUser(null));
+  }, []);
 
   const login = useCallback(async (email, password) => {
     const data = await authApi.login(email, password);
-    localStorage.setItem("access_token", data.access_token);
-    localStorage.setItem("refresh_token", data.refresh_token);
-    localStorage.setItem("user", JSON.stringify(data.user));
+    saveSession({
+      access_token: data.access_token,
+      refresh_token: data.refresh_token,
+      user: data.user,
+    });
     setUser(data.user);
     return data;
   }, []);
@@ -28,16 +37,21 @@ export function AuthProvider({ children }) {
   const logout = useCallback(async () => {
     try {
       await authApi.logout();
+    } catch {
+      /* still clear local session */
     } finally {
-      localStorage.removeItem("access_token");
-      localStorage.removeItem("refresh_token");
-      localStorage.removeItem("user");
+      clearSession();
       setUser(null);
     }
   }, []);
 
   const value = useMemo(
-    () => ({ user, login, logout, isAuthenticated: Boolean(user) }),
+    () => ({
+      user,
+      login,
+      logout,
+      isAuthenticated: Boolean(user && hasActiveSession()),
+    }),
     [user, login, logout]
   );
 

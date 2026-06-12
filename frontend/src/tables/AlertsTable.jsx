@@ -1,49 +1,81 @@
 import { AlertTypes } from "../enums/alertTypes";
 
+function priorityBadge(priority = "") {
+  const p = priority.toUpperCase();
+  if (p === "CRITICAL") return { cls: "badge-critical", label: "Critical" };
+  if (p === "MODERATE" || p === "MEDIUM") return { cls: "badge-moderate", label: "Moderate" };
+  return { cls: "badge-low", label: "Normal" };
+}
+
 export function AlertsTable({ alerts, onAcknowledge, acknowledgingId }) {
   if (!alerts?.length) {
-    return <p className="empty-state">No active alerts.</p>;
+    return (
+      <div style={{
+        textAlign: "center", padding: "2.5rem", color: "var(--text-muted)",
+        background: "#f8fafc", borderRadius: "8px", fontSize: "0.95rem",
+      }}>
+        <div style={{ fontSize: "2rem", marginBottom: "0.5rem" }}>✓</div>
+        No active alerts — all clear.
+      </div>
+    );
   }
+
   return (
     <table className="data-table">
       <thead>
         <tr>
-          <th>Title</th>
           <th>Priority</th>
+          <th>Title</th>
           <th>Message</th>
           <th>Created</th>
-          {onAcknowledge ? <th>Action</th> : null}
+          {onAcknowledge && <th style={{ textAlign: "right" }}>Action</th>}
         </tr>
       </thead>
       <tbody>
-        {alerts.map((alert) => (
-          <tr
-            key={alert.id}
-            className={
-              alert.priority === AlertTypes.CRITICAL ? "row-critical" : ""
-            }
-          >
-            <td>{alert.title}</td>
-            <td>{alert.priority}</td>
-            <td>{alert.message}</td>
-            <td>{new Date(alert.created_at).toLocaleString()}</td>
-            {onAcknowledge ? (
+        {alerts.map((alert) => {
+          const { cls, label } = priorityBadge(alert.priority);
+          return (
+            <tr
+              key={alert.id}
+              className={alert.priority === AlertTypes.CRITICAL ? "row-critical" : ""}
+            >
               <td>
-                {alert.is_acknowledged ? (
-                  "Acknowledged"
-                ) : (
-                  <button
-                    type="button"
-                    onClick={() => onAcknowledge(alert.id)}
-                    disabled={acknowledgingId === alert.id}
-                  >
-                    {acknowledgingId === alert.id ? "Saving..." : "Acknowledge"}
-                  </button>
-                )}
+                <span className={`badge ${cls}`}>{label}</span>
               </td>
-            ) : null}
-          </tr>
-        ))}
+              <td style={{ fontWeight: 600 }}>{alert.title}</td>
+              <td style={{ color: "var(--text-secondary)", maxWidth: "320px" }}>{alert.message}</td>
+              <td style={{ whiteSpace: "nowrap", color: "var(--text-muted)", fontSize: "0.85rem" }}>
+                {new Date(alert.created_at).toLocaleString("en-IN", {
+                  day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit",
+                })}
+              </td>
+              {onAcknowledge && (
+                <td style={{ textAlign: "right" }}>
+                  {alert.is_acknowledged ? (
+                    <span style={{ color: "var(--risk-low)", fontWeight: 600, fontSize: "0.85rem" }}>
+                      ✓ Acknowledged
+                    </span>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => onAcknowledge(alert.id)}
+                      disabled={acknowledgingId === alert.id}
+                      style={{
+                        background: "var(--primary-blue)", color: "#fff", border: "none",
+                        padding: "0.4rem 0.85rem", borderRadius: "6px",
+                        cursor: "pointer", fontSize: "0.85rem", fontWeight: 600,
+                        opacity: acknowledgingId === alert.id ? 0.6 : 1,
+                        transition: "opacity 0.15s",
+                      }}
+                    >
+                      {acknowledgingId === alert.id ? "Saving…" : "Acknowledge"}
+                    </button>
+                  )}
+                </td>
+              )}
+            </tr>
+          );
+        })}
       </tbody>
     </table>
   );

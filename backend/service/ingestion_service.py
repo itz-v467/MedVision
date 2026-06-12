@@ -26,17 +26,20 @@ from backend.service.longitudinal_analysis_service import LongitudinalAnalysisSe
 from backend.service.medical_nlp_service import MedicalNlpService
 from backend.service.multimodal_correlation_service import MultimodalCorrelationService
 from backend.service.ocr_service import OcrService
+from backend.utils.debug_log import pipeline_debug, pipeline_info, pipeline_warning
 from backend.utils.exceptions import NotFoundException, ValidationException
+from backend.utils.patient_name_matcher import compare_patient_names
+from backend.utils.pipeline_tracker import (
+    PipelineTracker,
+    plain_step_label,
+    summarize_pipeline_step,
+)
+from backend.service.patient_search_service import PatientSearchService
+from backend.utils.patient_id_generator import resolve_patient_external_id
+from backend.utils.upload_validation import validate_upload
 
 logger = get_logger()
 
-ALLOWED_MIME_TYPES = {
-    "application/pdf",
-    "image/png",
-    "image/jpeg",
-    "text/plain",
-    "text/csv",
-}
 MAX_FILE_SIZE_BYTES = 50 * 1024 * 1024
 
 
@@ -68,16 +71,21 @@ class IngestionService(BaseService):
         file_name: str,
         mime_type: str,
         file_type: str,
+        patient_age: str | None = None,
+        patient_gender: str | None = None,
     ) -> dict[str, Any]:
         """Upload file and execute AI pipeline."""
-        if mime_type not in ALLOWED_MIME_TYPES:
-            raise ValidationException("Unsupported file type.")
+        mime_type = validate_upload(file_name, mime_type, file_type)
 
         file_stream.seek(0, 2)
         size = file_stream.tell()
         file_stream.seek(0)
         if size > MAX_FILE_SIZE_BYTES:
             raise ValidationException("File exceeds maximum allowed size.")
+
+        patient_external_id = resolve_patient_external_id(
+            self._session, patient_external_id
+        )
 
         patient = (
             self._session.query(PatientModel)
@@ -88,9 +96,31 @@ class IngestionService(BaseService):
             patient = PatientModel(
                 external_id=patient_external_id,
                 full_name=patient_name,
+                date_of_birth=patient_age,
+                gender=patient_gender,
             )
             self._session.add(patient)
             self._session.flush()
+        else:
+            if patient_name and patient_name.strip().lower() not in {"unknown patient", "unknown"}:
+                patient.full_name = patient_name
+            if patient_age:
+                patient.date_of_birth = patient_age
+            if patient_gender:
+                patient.gender = patient_gender
+
+        PatientSearchService(self._session).index_patient(patient)
+
+        if not patient_name or not patient_name.strip():
+            raise ValidationException("Please enter the patient's full name.")
+
+        pipeline_info(
+            "upload",
+            "Starting clinical upload",
+            patient=patient_name,
+            file_type=file_type,
+            file_name=file_name,
+        )
 
         encounter = EncounterModel(
             patient_id=patient.id,
@@ -111,44 +141,135 @@ class IngestionService(BaseService):
         self._document_dao.create_document(document)
         self._audit.log_action(user_id, "FILE_UPLOAD", "document", str(document.id))
 
-        ocr_result = self._ocr.process_document(document.id)
+        tracker = PipelineTracker()
+
+        ocr_label, ocr_detail = plain_step_label("ocr")
+        with tracker.run_step("ocr", ocr_label, ocr_detail) as ocr_record:
+            ocr_result = self._ocr.process_document(document.id)
+            pipeline_debug(
+                "ocr",
+                "OCR finished",
+                confidence=ocr_result.get("confidence"),
+                chars=len(ocr_result.get("raw_text", "")),
+                biomarkers=len(
+                    ocr_result.get("structured_data", {}).get("biomarkers", [])
+                ),
+            )
+            demographics = ocr_result.get("structured_data", {}).get(
+                "patient_demographics", {}
+            )
+            extracted_name = demographics.get("full_name", "")
+            name_validation = compare_patient_names(patient_name, extracted_name)
+            if not name_validation["matched"]:
+                pipeline_warning(
+                    "identity",
+                    "Name check warning — continuing processing",
+                    entered=patient_name,
+                    extracted=extracted_name,
+                )
+
+            structured = dict(ocr_result.get("structured_data", {}))
+            structured["name_validation"] = name_validation
+            ocr_result["structured_data"] = structured
+            self._persist_ocr_structured_data(document.id, structured)
+            ocr_record["summary"] = summarize_pipeline_step("ocr", ocr_result, file_type)
+
         nlp_text = ocr_result.get("raw_text") or ""
-        nlp_result = self._nlp.process_encounter(encounter.id, nlp_text)
-        imaging_result = self._imaging.analyze_study(
-            encounter.id, storage_path, mime_type, file_type
-        )
-        correlation = self._correlation.correlate(
-            encounter.id,
-            {
-                "imaging_confidence": imaging_result["confidence"],
-                "ocr_confidence": ocr_result["confidence"],
-                "nlp_confidence": nlp_result["confidence"],
-            },
-        )
+        nlp_label, nlp_detail = plain_step_label("nlp")
+        with tracker.run_step("nlp", nlp_label, nlp_detail) as nlp_record:
+            nlp_result = self._nlp.process_encounter(encounter.id, nlp_text)
+            nlp_record["summary"] = summarize_pipeline_step("nlp", nlp_result, file_type)
+
+        img_label, img_detail = plain_step_label("imaging")
+        with tracker.run_step("imaging", img_label, img_detail) as imaging_record:
+            imaging_result = self._imaging.analyze_study(
+                encounter.id, storage_path, mime_type, file_type
+            )
+            if imaging_result.get("skipped"):
+                imaging_record["status"] = "skipped"
+            imaging_record["summary"] = summarize_pipeline_step(
+                "imaging", imaging_result, file_type
+            )
+
+        corr_label, corr_detail = plain_step_label("correlation")
+        with tracker.run_step("correlation", corr_label, corr_detail) as correlation_record:
+            correlation = self._correlation.correlate(
+                encounter.id,
+                {
+                    "imaging_confidence": imaging_result["confidence"],
+                    "ocr_confidence": ocr_result["confidence"],
+                    "nlp_confidence": nlp_result["confidence"],
+                    "imaging_skipped": imaging_result.get("skipped", False),
+                    "file_type": file_type,
+                },
+            )
+            correlation_record["summary"] = summarize_pipeline_step(
+                "correlation", correlation, file_type
+            )
+
         explanation = self._explainability.build_explanation(
             encounter.id,
             imaging_result.get("findings") or {},
             imaging_result.get("heatmap_path"),
         )
-        summary = self._summary.generate_summary(
-            encounter.id,
-            {
-                "ocr": ocr_result,
-                "nlp": nlp_result,
-                "imaging": imaging_result,
-                "correlation": correlation,
-            },
-        )
+
+        rag_label, rag_detail = plain_step_label("rag")
+        with tracker.run_step("rag", rag_label, rag_detail) as rag_record:
+            rag_record["summary"] = "Preparing multimodal context"
+
+        sum_label, sum_detail = plain_step_label("summary")
+        with tracker.run_step("summary", sum_label, sum_detail) as summary_record:
+            summary = self._summary.generate_summary(
+                encounter.id,
+                {
+                    "file_type": file_type,
+                    "ocr": ocr_result,
+                    "nlp": nlp_result,
+                    "imaging": imaging_result,
+                    "correlation": correlation,
+                },
+            )
+            summary_record["summary"] = summarize_pipeline_step(
+                "summary", summary, file_type
+            )
+            evidence = summary.get("evidence_sources", {})
+            rag_chunks = evidence.get("rag_chunks") if isinstance(evidence, dict) else []
+            if isinstance(rag_chunks, list) and rag_chunks:
+                for step in tracker.steps:
+                    if step["id"] == "rag":
+                        step["summary"] = f"{len(rag_chunks)} evidence chunks retrieved"
+                        break
+
         findings = imaging_result.get("findings") or {}
-        alerts = self._alerts.evaluate_findings(encounter.id, findings)
+        alert_label, alert_detail = plain_step_label("alerts")
+        with tracker.run_step("alerts", alert_label, alert_detail) as alerts_record:
+            alerts = self._alerts.evaluate_findings(encounter.id, findings)
+            alerts_record["summary"] = summarize_pipeline_step("alerts", alerts, file_type)
+
+        pipeline_run = tracker.as_dict()
+        structured["pipeline_run"] = pipeline_run
+        self._persist_ocr_structured_data(document.id, structured)
 
         encounter.status = AiProcessingStatus.REVIEW_REQUIRED.value
         self._encounter_dao.update(encounter)
         logger.info("Workflow completed | encounter=%s", encounter.id)
 
+        lab_analysis = structured.get("lab_analysis", {})
         return {
             "encounter_id": str(encounter.id),
             "document_id": str(document.id),
+            "patient_external_id": patient.external_id,
+            "patient_id": str(patient.id),
+            "name_validation": name_validation,
+            "pipeline": pipeline_run,
+            "results_overview": self._build_results_overview(
+                file_type=file_type,
+                ocr_result=ocr_result,
+                lab_analysis=lab_analysis,
+                summary=summary,
+                alerts=alerts,
+                name_validation=name_validation,
+            ),
             "ocr": ocr_result,
             "nlp": nlp_result,
             "imaging": imaging_result,
@@ -160,24 +281,61 @@ class IngestionService(BaseService):
         }
 
     def list_encounters(self) -> list[dict[str, Any]]:
-        """Return encounter triage queue."""
-        encounters = self._encounter_dao.list_recent()
+        """Return encounter triage queue (excludes soft-deleted)."""
+        rows = self._encounter_dao.list_recent_with_patient()
         return [
             {
                 "id": str(encounter.id),
                 "patient_id": str(encounter.patient_id),
+                "patient_name": patient.full_name if patient else None,
+                "patient_external_id": patient.external_id if patient else None,
                 "status": encounter.status,
                 "chief_complaint": encounter.chief_complaint,
                 "created_at": encounter.created_at.isoformat(),
             }
-            for encounter in encounters
+            for encounter, patient in rows
         ]
+
+    def delete_encounter(
+        self, encounter_id: uuid.UUID, user_id: uuid.UUID
+    ) -> dict[str, Any]:
+        """Soft-delete an encounter while preserving an audit log snapshot."""
+        encounter = self._encounter_dao.find_by_id(encounter_id)
+        if encounter is None or encounter.status == AiProcessingStatus.DELETED.value:
+            raise NotFoundException("Record not found or already removed.")
+
+        snapshot = self.get_encounter_detail(encounter_id)
+        encounter.status = AiProcessingStatus.DELETED.value
+        self._encounter_dao.update(encounter)
+
+        self._audit.log_action(
+            user_id,
+            "ENCOUNTER_DELETED",
+            "encounter",
+            str(encounter_id),
+            metadata={
+                "patient_id": str(encounter.patient_id),
+                "snapshot": snapshot,
+                "reason": "user_requested_delete",
+            },
+        )
+        pipeline_info(
+            "delete",
+            "Encounter soft-deleted",
+            encounter_id=str(encounter_id),
+            user_id=str(user_id),
+        )
+        return {
+            "encounter_id": str(encounter_id),
+            "status": encounter.status,
+            "message": "Record removed. A secure activity log has been saved.",
+        }
 
     def get_encounter_detail(self, encounter_id: uuid.UUID) -> dict[str, Any]:
         """Return full encounter detail for physician review."""
         encounter = self._encounter_dao.find_by_id(encounter_id)
-        if encounter is None:
-            raise NotFoundException("Encounter not found.")
+        if encounter is None or encounter.status == AiProcessingStatus.DELETED.value:
+            raise NotFoundException("This record was removed or does not exist.")
 
         patient = (
             self._session.query(PatientModel)
@@ -192,6 +350,21 @@ class IngestionService(BaseService):
         documents = self._document_dao.find_documents_by_encounter(encounter_id)
         timeline = self._longitudinal.build_timeline(encounter.patient_id)
         imaging = self._serialize_imaging(study, inference, encounter_id)
+        ocr_payload = self._serialize_ocr(ocr)
+        structured = (ocr_payload or {}).get("structured_data", {})
+        name_validation = structured.get("name_validation")
+        pipeline_run = structured.get("pipeline_run")
+        lab_analysis = structured.get("lab_analysis", {})
+        results_overview = None
+        if structured:
+            results_overview = self._build_results_overview(
+                file_type=documents[0].file_type if documents else "clinical_note",
+                ocr_result={"structured_data": structured},
+                lab_analysis=lab_analysis,
+                summary=self._serialize_summary(summary) or {},
+                alerts=alerts,
+                name_validation=name_validation or {},
+            )
 
         return {
             "encounter": {
@@ -205,6 +378,8 @@ class IngestionService(BaseService):
                 "id": str(patient.id) if patient else None,
                 "external_id": patient.external_id if patient else None,
                 "full_name": patient.full_name if patient else None,
+                "date_of_birth": patient.date_of_birth if patient else None,
+                "gender": patient.gender if patient else None,
             },
             "documents": [
                 {
@@ -216,10 +391,13 @@ class IngestionService(BaseService):
                 }
                 for doc in documents
             ],
-            "ocr": self._serialize_ocr(ocr),
+            "ocr": ocr_payload,
             "nlp": self._serialize_nlp(nlp),
             "imaging": imaging,
             "summary": self._serialize_summary(summary),
+            "name_validation": name_validation,
+            "pipeline": pipeline_run,
+            "results_overview": results_overview,
             "timeline": timeline,
             "alerts": [
                 {
@@ -313,6 +491,62 @@ class IngestionService(BaseService):
             "status": summary.status,
             "message": "Summary finalized.",
         }
+
+    def _persist_ocr_structured_data(
+        self, document_id: uuid.UUID, structured: dict[str, Any]
+    ) -> None:
+        """Update stored OCR structured payload."""
+        ocr = self._document_dao.find_ocr_by_document(document_id)
+        if ocr is not None:
+            ocr.structured_data = structured
+            self._document_dao.save_ocr_result(ocr)
+
+    def _build_results_overview(
+        self,
+        *,
+        file_type: str,
+        ocr_result: dict[str, Any],
+        lab_analysis: dict[str, Any],
+        summary: dict[str, Any],
+        alerts: list[Any],
+        name_validation: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Structured high-level results for the review UI."""
+        biomarkers = ocr_result.get("structured_data", {}).get("biomarkers", [])
+        abnormal = lab_analysis.get("abnormal_count", 0)
+        normal = lab_analysis.get("normal_count", 0)
+        return {
+            "document_type": file_type,
+            "identity_verified": name_validation.get("matched", False),
+            "extracted_patient_name": name_validation.get("extracted_name", ""),
+            "entered_patient_name": name_validation.get("entered_name", ""),
+            "lab_tests_parsed": len(biomarkers),
+            "lab_abnormal_count": abnormal,
+            "lab_normal_count": normal,
+            "panel_coverage_pct": lab_analysis.get("panel_coverage_pct"),
+            "summary_status": summary.get("status"),
+            "alert_count": len(alerts) if isinstance(alerts, list) else 0,
+            "headline": self._results_headline(file_type, abnormal, normal, alerts),
+        }
+
+    def _results_headline(
+        self,
+        file_type: str,
+        abnormal: int,
+        normal: int,
+        alerts: list[Any],
+    ) -> str:
+        """One-line clinical headline for the results overview."""
+        if file_type == "lab_report":
+            if abnormal > 0:
+                return f"{abnormal} test result(s) are outside the usual healthy range — please show your doctor."
+            if normal > 0:
+                return f"Good news: {normal} test result(s) look healthy based on standard ranges."
+            return "Report uploaded — please ask your doctor to review the extracted values."
+        alert_count = len(alerts) if isinstance(alerts, list) else 0
+        if alert_count:
+            return f"{alert_count} reminder(s) added — please review with your doctor."
+        return "Analysis complete — your doctor should review this before any decisions."
 
     def _serialize_ocr(self, ocr: Any) -> dict[str, Any] | None:
         """Serialize OCR ORM row."""

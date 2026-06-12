@@ -13,3 +13,4 @@ class AiProcessingStatus(str, Enum):
     FAILED = "FAILED"
     REVIEW_REQUIRED = "REVIEW_REQUIRED"
     FINALIZED = "FINALIZED"
+    DELETED = "DELETED"

@@ -25,13 +25,27 @@ class LoggerSetup:
         app_log_path = os.path.join(log_dir, "app.log")
         error_log_path = os.path.join(log_dir, "error.log")
 
+        log_level_name = os.getenv("LOG_LEVEL", "DEBUG").upper()
+        log_level = getattr(logging, log_level_name, logging.DEBUG)
+
         logger = logging.getLogger("medvision")
         logger.setLevel(logging.DEBUG)
         logger.propagate = False
 
+        pipeline_logger = logging.getLogger("medvision.pipeline")
+        pipeline_logger.setLevel(logging.DEBUG)
+        pipeline_logger.propagate = False
+
         formatter = logging.Formatter(
             "%(asctime)s | %(levelname)s | %(name)s | %(message)s"
         )
+
+        debug_log_path = os.path.join(log_dir, "debug.log")
+        debug_handler = RotatingFileHandler(
+            debug_log_path, maxBytes=10_000_000, backupCount=5
+        )
+        debug_handler.setLevel(logging.DEBUG)
+        debug_handler.setFormatter(formatter)
 
         app_handler = RotatingFileHandler(
             app_log_path, maxBytes=5_000_000, backupCount=5
@@ -46,12 +60,14 @@ class LoggerSetup:
         error_handler.setFormatter(formatter)
 
         console_handler = logging.StreamHandler()
-        console_handler.setLevel(logging.INFO)
+        console_handler.setLevel(log_level)
         console_handler.setFormatter(formatter)
 
-        logger.addHandler(app_handler)
-        logger.addHandler(error_handler)
-        logger.addHandler(console_handler)
+        for target in (logger, pipeline_logger):
+            target.addHandler(debug_handler)
+            target.addHandler(app_handler)
+            target.addHandler(error_handler)
+            target.addHandler(console_handler)
 
         cls._logger = logger
         cls._configured = True

@@ -67,14 +67,8 @@ class ClinicalSummaryService(BaseService):
             "clinical summary evidence imaging labs symptoms",
         )
 
-        from backend.ai.rag.orchestrator import rag_orchestrator
-        
-        query_text = f"Generate clinical summary. Context: {json.dumps(context, default=str)}"
-        summary_result = rag_orchestrator.run(query=query_text, patient_id=str(encounter_id))
-        
-        summary_text = summary_result.get("summary", "Summary generation failed.")
-        
-        evidence = {**context, "rag_chunks": grounded_chunks, "structured_summary": summary_result}
+        summary_text = self._openai.generate_summary(context, grounded_chunks)
+        evidence = {**context, "rag_chunks": grounded_chunks}
         summary = ClinicalSummaryModel(
             encounter_id=encounter_id,
             summary_text=summary_text,
@@ -88,6 +82,7 @@ class ClinicalSummaryService(BaseService):
             "summary_id": str(summary.id),
             "summary_text": summary_text,
             "status": summary.status,
+            "evidence_sources": evidence,
             "message": Messages.SUMMARY_PENDING_REVIEW.value,
             "model_version": model.get("version", "1.0.0"),
             "latency_ms": latency_ms,

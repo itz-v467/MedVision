@@ -9,12 +9,20 @@ from typing import Any
 from sqlalchemy.orm import Session
 
 from backend.client.ml_model_loader import get_ml_model_loader
-from backend.client.ocr_extractor import extract_text_from_file, parse_biomarkers
+from backend.client.document_ocr_client import get_ocr_capabilities
+from backend.client.ocr_extractor import (
+    extract_text_from_file,
+    extraction_warning_for_text,
+)
+from backend.service.lab_analysis_service import LabAnalysisService
+from backend.utils.lab_value_normalizer import clean_ocr_lab_text
+from backend.utils.patient_demographics_extractor import extract_patient_demographics
 from backend.core.base_service import BaseService
 from backend.dao.document_dao import DocumentDao
 from backend.enums.ai_status import AiProcessingStatus
 from backend.enums.model_type import ModelType
 from backend.logger import get_logger
+from backend.utils.debug_log import pipeline_debug, pipeline_info, pipeline_warning
 from backend.model.document_model import OcrResultModel
 from backend.utils.exceptions import AiProcessingException
 
@@ -38,21 +46,66 @@ class OcrService(BaseService):
 
         start = time.perf_counter()
         model = self._model_loader.get_model(ModelType.OCR)
-        logger.info("OCR inference started | document=%s", document_id)
+        pipeline_info("ocr", "OCR started", document_id=str(document_id), mime=document.mime_type)
 
-        raw_text, text_confidence = extract_text_from_file(
+        raw_text, text_confidence, extraction_method = extract_text_from_file(
             document.storage_path, document.mime_type
         )
-        biomarkers = parse_biomarkers(raw_text)
+        pipeline_debug(
+            "ocr",
+            "Text extraction finished",
+            method=extraction_method,
+            chars=len(raw_text),
+            confidence=text_confidence,
+        )
+        if not raw_text.strip():
+            pipeline_warning(
+                "ocr",
+                "No text extracted from document",
+                document_id=str(document_id),
+                method=extraction_method,
+            )
+
+        raw_text = clean_ocr_lab_text(raw_text)
+        lab_analysis = LabAnalysisService().analyze_text(raw_text)
+        pipeline_debug(
+            "ocr",
+            "Lab analysis finished",
+            biomarkers=lab_analysis.get("total_parsed", 0),
+            abnormal=lab_analysis.get("abnormal_count", 0),
+        )
+        biomarkers = lab_analysis["biomarkers"]
+        warning = extraction_warning_for_text(
+            raw_text, document.mime_type, extraction_method
+        )
         structured_data = {
-            "patient_demographics": {},
-            "biomarkers": biomarkers,
+            "patient_demographics": extract_patient_demographics(raw_text),
+            "biomarkers": lab_analysis["biomarkers"],
+            "lab_analysis": {
+                "precautions": lab_analysis["precautions"],
+                "wellness_notes": lab_analysis["wellness_notes"],
+                "panel_coverage_pct": lab_analysis["panel_coverage_pct"],
+                "missing_core_tests": lab_analysis["missing_core_tests"],
+                "clinical_summary": lab_analysis["clinical_summary"],
+                "abnormal_count": lab_analysis["abnormal_count"],
+                "normal_count": lab_analysis["normal_count"],
+                "total_parsed": lab_analysis["total_parsed"],
+                "disclaimer": lab_analysis["disclaimer"],
+                "llm_extraction": lab_analysis.get("llm_extraction", {}),
+            },
             "raw_text": raw_text,
+            "raw_text_preview": raw_text[:2000] if raw_text else "",
+            "chars_extracted": len(raw_text),
+            "extraction_method": extraction_method,
+            "extraction_warning": warning,
+            "ocr_engines_available": get_ocr_capabilities(),
             "model_version": model.get("version", "1.0.0"),
         }
         confidence = text_confidence
         if biomarkers:
-            confidence = min(confidence + 0.05, 0.95)
+            confidence = min(confidence + 0.1, 0.95)
+        elif warning:
+            confidence = min(confidence, 0.35)
 
         latency_ms = (time.perf_counter() - start) * 1000
 

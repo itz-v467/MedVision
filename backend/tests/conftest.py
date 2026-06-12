@@ -50,7 +50,7 @@ def app() -> FastAPI:
     tables = [
         table
         for table in Base.metadata.sorted_tables
-        if table.name != "document_embeddings"
+        if table.name not in ("document_embeddings", "patient_embeddings")
     ]
     Base.metadata.create_all(bind=get_database_manager().engine, tables=tables)
     return application

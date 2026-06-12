@@ -69,6 +69,60 @@ class TestClinicalWorkflow:
         assert finalized.status_code == 200
         assert finalized.json()["data"]["status"] == "FINALIZED"
 
+    def test_upload_lab_report_pdf_pipeline(self, client) -> None:
+        """Process a text-based PDF lab report through the full pipeline."""
+        headers = self._auth_headers(client)
+        try:
+            from pypdf import PdfWriter
+        except ImportError:
+            return
+
+        buffer = io.BytesIO()
+        writer = PdfWriter()
+        page = writer.add_blank_page(width=612, height=792)
+        writer.add_annotation(
+            page_number=0,
+            annotation={
+                "/Type": "/Annot",
+                "/Subtype": "/FreeText",
+                "/Contents": "Hemoglobin 12.5 g/dL Glucose 105 mg/dL WBC 6.8",
+                "/Rect": [100, 700, 400, 720],
+            },
+        )
+        writer.write(buffer)
+        buffer.seek(0)
+
+        upload = client.post(
+            "/api/clinical/upload",
+            headers=headers,
+            data={
+                "patient_external_id": "P-LAB-PDF",
+                "patient_name": "Lab PDF Patient",
+                "file_type": "lab_report",
+            },
+            files={"file": ("blood_report.pdf", buffer, "application/pdf")},
+        )
+        assert upload.status_code == 200
+        payload = upload.json()["data"]
+        assert payload["ocr"]["confidence"] > 0
+        assert payload["summary"]["summary_text"]
+
+    def test_upload_rejects_file_type_mismatch(self, client) -> None:
+        """Return a clear validation error when file type does not match MIME."""
+        headers = self._auth_headers(client)
+        upload = client.post(
+            "/api/clinical/upload",
+            headers=headers,
+            data={
+                "patient_external_id": "P-MISMATCH",
+                "patient_name": "Mismatch Patient",
+                "file_type": "clinical_note",
+            },
+            files={"file": ("scan.jpeg", io.BytesIO(b"fake-jpeg"), "image/jpeg")},
+        )
+        assert upload.status_code == 400
+        assert "does not match" in upload.json()["message"].lower()
+
     def test_timeline_and_alert_acknowledge(self, client) -> None:
         """Return patient timeline and acknowledge generated alerts."""
         headers = self._auth_headers(client)

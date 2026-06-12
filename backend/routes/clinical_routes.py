@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import uuid
 
-from fastapi import APIRouter, Depends, File, Form, UploadFile
+from fastapi import APIRouter, Depends, File, Form, Query, UploadFile
 
 from backend.auth.dependencies import AuthDependencies, get_current_user
 from backend.controller.clinical_controller import ClinicalController
@@ -33,9 +33,11 @@ _review_roles = (
 async def upload(
     current_user: CurrentUser = Depends(_auth.require_roles(*_upload_roles)),
     file: UploadFile = File(...),
-    patient_external_id: str = Form("P-UNKNOWN"),
+    patient_external_id: str = Form("AUTO"),
     patient_name: str = Form("Unknown Patient"),
     file_type: str = Form("lab_report"),
+    patient_age: str = Form(None),
+    patient_gender: str = Form(None),
 ):
     """Upload file and run full AI clinical pipeline."""
     return await _controller.upload(
@@ -44,7 +46,25 @@ async def upload(
         patient_external_id,
         patient_name,
         file_type,
+        patient_age,
+        patient_gender,
     )
+
+
+@router.get("/patients/search")
+def search_patients(
+    q: str = Query(""),
+    limit: int = Query(10, ge=1, le=25),
+    _user: CurrentUser = Depends(get_current_user),
+):
+    """Search patients by name, MedVision ID, or semantic similarity."""
+    return _controller.search_patients(q, limit=limit)
+
+
+@router.get("/patients/preview-id")
+def preview_patient_id(_user: CurrentUser = Depends(get_current_user)):
+    """Preview the next MedVision patient number (assigned formally at upload)."""
+    return _controller.preview_patient_id()
 
 
 @router.get("/encounters")
@@ -60,6 +80,15 @@ def encounter_detail(
 ):
     """Full encounter detail for physician review."""
     return _controller.get_encounter(encounter_id)
+
+
+@router.delete("/encounters/{encounter_id}")
+def delete_encounter(
+    encounter_id: uuid.UUID,
+    current_user: CurrentUser = Depends(_auth.require_roles(*_upload_roles)),
+):
+    """Remove encounter from queue; activity log is preserved."""
+    return _controller.delete_encounter(encounter_id, current_user)
 
 
 @router.post("/summaries/{summary_id}/finalize")

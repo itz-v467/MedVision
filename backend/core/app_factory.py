@@ -65,6 +65,11 @@ class AppFactory:
             """Service health check."""
             return health_api.health()
 
+        @self._app.get("/health/ocr", tags=["Health"])
+        def ocr_health():
+            """OCR engine availability check."""
+            return health_api.ocr_status()
+
     def _ensure_database(self) -> None:
         """Create tables for non-production environments."""
         if get_settings().is_production:
@@ -81,7 +86,7 @@ class AppFactory:
         return [
             table
             for table in Base.metadata.sorted_tables
-            if table.name != "document_embeddings"
+            if table.name not in ("document_embeddings", "patient_embeddings")
         ]
 
     def run_dev_server(self) -> None:

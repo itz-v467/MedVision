@@ -1,9 +1,16 @@
-from langgraph.graph import StateGraph, END
-import operator
-from typing import TypedDict, Annotated, Sequence
+from __future__ import annotations
+
 import logging
+from typing import TypedDict
 
 logger = logging.getLogger(__name__)
+
+try:
+    from langgraph.graph import END, StateGraph
+except ImportError:  # pragma: no cover - optional Phase 3 dependency
+    StateGraph = None  # type: ignore[misc, assignment]
+    END = None  # type: ignore[misc, assignment]
+
 
 class AgentState(TypedDict):
     query: str
@@ -11,8 +18,12 @@ class AgentState(TypedDict):
     retrieved_docs: list
     generated_summary: dict
 
+
 class RAGOrchestrator:
     def __init__(self):
+        if StateGraph is None or END is None:
+            self.app = None
+            return
         self.workflow = StateGraph(AgentState)
         self.workflow.add_node("retrieve", self.retrieve_node)
         self.workflow.add_node("generate", self.generate_node)
@@ -40,8 +51,19 @@ class RAGOrchestrator:
         return state
 
     def run(self, query: str, patient_id: str):
-        state = {"query": query, "patient_id": patient_id, "retrieved_docs": [], "generated_summary": {}}
+        if self.app is None:
+            raise RuntimeError(
+                "langgraph is not installed. Use OpenAI summary path or "
+                "pip install -r backend/requirements-ml.txt"
+            )
+        state = {
+            "query": query,
+            "patient_id": patient_id,
+            "retrieved_docs": [],
+            "generated_summary": {},
+        }
         result = self.app.invoke(state)
-        return result['generated_summary']
+        return result["generated_summary"]
+
 
 rag_orchestrator = RAGOrchestrator()

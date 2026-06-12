@@ -12,6 +12,8 @@ from backend.core.base_controller import BaseController
 from backend.core.request_context import CurrentUser
 from backend.db import get_database_manager
 from backend.service.ingestion_service import IngestionService
+from backend.service.patient_search_service import PatientSearchService
+from backend.utils.patient_id_generator import generate_patient_external_id
 from backend.utils.exceptions import ValidationException
 from backend.utils.response_builder import ResponseBuilder
 
@@ -30,6 +32,8 @@ class ClinicalController(BaseController):
         patient_external_id: str,
         patient_name: str,
         file_type: str,
+        patient_age: str | None = None,
+        patient_gender: str | None = None,
     ) -> JSONResponse:
         """Upload and process clinical files."""
         if file is None:
@@ -48,8 +52,24 @@ class ClinicalController(BaseController):
                 file_name=file.filename or "upload.bin",
                 mime_type=mime_type,
                 file_type=file_type,
+                patient_age=patient_age,
+                patient_gender=patient_gender,
             )
         return ResponseBuilder.success(result)
+
+    def search_patients(self, query: str, limit: int = 10) -> JSONResponse:
+        """Semantic + keyword patient search."""
+        with get_database_manager().session_scope() as session:
+            results = PatientSearchService(session).search(query, limit=limit)
+        return ResponseBuilder.success({"patients": results, "query": query})
+
+    def preview_patient_id(self) -> JSONResponse:
+        """Preview the next auto-generated MedVision patient number."""
+        with get_database_manager().session_scope() as session:
+            external_id = generate_patient_external_id(session)
+        return ResponseBuilder.success(
+            {"patient_external_id": external_id, "auto_generated": True}
+        )
 
     def list_encounters(self) -> JSONResponse:
         """Return encounter triage queue."""
@@ -62,6 +82,16 @@ class ClinicalController(BaseController):
         with get_database_manager().session_scope() as session:
             data = IngestionService(session).get_encounter_detail(encounter_id)
         return ResponseBuilder.success(data)
+
+    def delete_encounter(
+        self, encounter_id: uuid.UUID, current_user: CurrentUser
+    ) -> JSONResponse:
+        """Soft-delete encounter; audit log retains a full snapshot."""
+        with get_database_manager().session_scope() as session:
+            result = IngestionService(session).delete_encounter(
+                encounter_id, current_user.user_id
+            )
+        return ResponseBuilder.success(result)
 
     def finalize_summary(
         self, summary_id: uuid.UUID, current_user: CurrentUser
@@ -110,5 +140,12 @@ class ClinicalController(BaseController):
         from backend.ai.explainability.citation_engine import citation_engine
         data = citation_engine.get_citation(citation_id)
         if not data:
-            return ResponseBuilder.error("Citation not found", status_code=404)
+            from backend.enums.api_errors import ApiErrorCode
+            from backend.enums.http_status import HttpStatus
+
+            return ResponseBuilder.error(
+                "Citation not found",
+                ApiErrorCode.NOT_FOUND.value,
+                HttpStatus.NOT_FOUND,
+            )
         return ResponseBuilder.success(data)

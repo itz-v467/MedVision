@@ -12,6 +12,10 @@ ENV PYTHONPATH=/app
 
 WORKDIR /app
 
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends tesseract-ocr tesseract-ocr-eng \
+    && rm -rf /var/lib/apt/lists/*
+
 RUN groupadd -r medvision && useradd -r -g medvision medvision
 
 COPY --from=builder /install /usr/local
@@ -26,4 +30,4 @@ EXPOSE 5000
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
   CMD python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:5000/health')"
 
-CMD ["uvicorn", "backend.app:create_app", "--factory", "--host", "0.0.0.0", "--port", "5000", "--workers", "4"]
+CMD ["uvicorn", "backend.app:create_app", "--factory", "--host", "0.0.0.0", "--port", "5000", "--reload"]

@@ -52,6 +52,9 @@ class SettingsManager(SingletonMixin):
         self.openai_embedding_model: str = os.getenv(
             "OPENAI_EMBEDDING_MODEL", "text-embedding-3-small"
         )
+        self.openai_lab_extraction_enabled: bool = os.getenv(
+            "OPENAI_LAB_EXTRACTION_ENABLED", "true"
+        ).lower() in ("1", "true", "yes")
         self.embedding_model_name: str = os.getenv(
             "EMBEDDING_MODEL_NAME", "sentence-transformers/all-MiniLM-L6-v2"
         )

@@ -84,10 +84,10 @@ class ImagingAiService(BaseService):
         }
 
     def _should_run_imaging(self, mime_type: str, file_type: str) -> bool:
-        """Return True when file is a chest X-ray candidate."""
-        if file_type in {"xray", "chest_xray", "imaging"}:
-            return mime_type in IMAGE_MIME_TYPES
-        return mime_type in IMAGE_MIME_TYPES
+        """Return True when upload is an explicit chest X-ray case."""
+        if mime_type not in IMAGE_MIME_TYPES:
+            return False
+        return file_type in {"xray", "chest_xray", "imaging"}
 
     def _skipped_result(self, start: float) -> dict[str, Any]:
         """Return neutral result when imaging is not applicable."""
