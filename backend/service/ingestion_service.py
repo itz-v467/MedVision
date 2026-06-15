@@ -35,8 +35,16 @@ from backend.utils.pipeline_tracker import (
     summarize_pipeline_step,
 )
 from backend.service.patient_search_service import PatientSearchService
+from backend.utils.imaging_summary import format_imaging_summary, imaging_attention_items
 from backend.utils.patient_id_generator import resolve_patient_external_id
-from backend.utils.upload_validation import validate_upload
+from backend.utils.upload_validation import (
+    IMAGE_MIME_TYPES,
+    normalize_file_type,
+    resolve_document_type,
+    validate_image_content,
+    validate_type_selection,
+    validate_upload,
+)
 
 logger = get_logger()
 
@@ -75,7 +83,10 @@ class IngestionService(BaseService):
         patient_gender: str | None = None,
     ) -> dict[str, Any]:
         """Upload file and execute AI pipeline."""
+        file_type = normalize_file_type(file_type)
         mime_type = validate_upload(file_name, mime_type, file_type)
+        validate_type_selection(file_name, mime_type, file_type)
+        file_type = resolve_document_type(file_name, mime_type, file_type)
 
         file_stream.seek(0, 2)
         size = file_stream.tell()
@@ -130,6 +141,8 @@ class IngestionService(BaseService):
         self._encounter_dao.create(encounter)
 
         storage_path = self._storage.save_file(file_stream, file_name)
+        if mime_type in IMAGE_MIME_TYPES:
+            validate_image_content(storage_path, file_type)
         document = DocumentModel(
             encounter_id=encounter.id,
             file_name=file_name,
@@ -190,6 +203,27 @@ class IngestionService(BaseService):
             imaging_record["summary"] = summarize_pipeline_step(
                 "imaging", imaging_result, file_type
             )
+
+        if file_type == "xray":
+            imaging_summary = format_imaging_summary(imaging_result)
+            structured = dict(ocr_result.get("structured_data", {}))
+            lab_analysis = dict(structured.get("lab_analysis", {}))
+            lab_analysis["clinical_summary"] = imaging_summary
+            lab_analysis["precautions"] = [
+                {
+                    "test": item["test"],
+                    "flag": item["flag"],
+                    "value": "",
+                    "reference_range": "",
+                    "precaution": item["text"],
+                    "severity": "high" if item["flag"] == "IMAGE" else "moderate",
+                }
+                for item in imaging_attention_items(imaging_result)
+            ]
+            structured["lab_analysis"] = lab_analysis
+            structured["imaging_summary"] = imaging_summary
+            ocr_result["structured_data"] = structured
+            self._persist_ocr_structured_data(document.id, structured)
 
         corr_label, corr_detail = plain_step_label("correlation")
         with tracker.run_step("correlation", corr_label, corr_detail) as correlation_record:
@@ -269,6 +303,7 @@ class IngestionService(BaseService):
                 summary=summary,
                 alerts=alerts,
                 name_validation=name_validation,
+                imaging_result=imaging_result,
             ),
             "ocr": ocr_result,
             "nlp": nlp_result,
@@ -364,6 +399,7 @@ class IngestionService(BaseService):
                 summary=self._serialize_summary(summary) or {},
                 alerts=alerts,
                 name_validation=name_validation or {},
+                imaging_result=imaging,
             )
 
         return {
@@ -432,10 +468,6 @@ class IngestionService(BaseService):
 
     def get_heatmap_path(self, encounter_id: uuid.UUID) -> str:
         """Return validated heatmap file path for an encounter."""
-        from pathlib import Path
-
-        from backend.config import get_settings
-
         encounter = self._encounter_dao.find_by_id(encounter_id)
         if encounter is None:
             raise NotFoundException("Encounter not found.")
@@ -444,17 +476,43 @@ class IngestionService(BaseService):
         if inference is None or not inference.heatmap_path:
             raise NotFoundException("Heatmap not available for this encounter.")
 
-        heatmap_path = Path(inference.heatmap_path).resolve()
+        return str(self._validate_storage_file(inference.heatmap_path))
+
+    def get_source_image_path(self, encounter_id: uuid.UUID) -> tuple[str, str]:
+        """Return validated source image path and MIME type for an encounter."""
+        from backend.service.imaging_ai_service import IMAGE_MIME_TYPES
+
+        encounter = self._encounter_dao.find_by_id(encounter_id)
+        if encounter is None:
+            raise NotFoundException("Encounter not found.")
+
+        documents = self._document_dao.find_documents_by_encounter(encounter_id)
+        if not documents:
+            raise NotFoundException("No document found for this encounter.")
+
+        document = documents[0]
+        if document.mime_type not in IMAGE_MIME_TYPES:
+            raise NotFoundException("Source file is not an image.")
+
+        return str(self._validate_storage_file(document.storage_path)), document.mime_type
+
+    def _validate_storage_file(self, file_path: str):
+        """Ensure a file path is inside the configured storage root."""
+        from pathlib import Path
+
+        from backend.config import get_settings
+
+        path = Path(file_path).resolve()
         storage_root = Path(get_settings().storage_path).resolve()
         try:
-            heatmap_path.relative_to(storage_root)
+            path.relative_to(storage_root)
         except ValueError as exc:
-            raise NotFoundException("Heatmap path is invalid.") from exc
+            raise NotFoundException("File path is invalid.") from exc
 
-        if not heatmap_path.is_file():
-            raise NotFoundException("Heatmap file not found.")
+        if not path.is_file():
+            raise NotFoundException("File not found on server.")
 
-        return str(heatmap_path)
+        return path
 
     def get_patient_timeline(self, patient_id: uuid.UUID) -> dict[str, Any]:
         """Return longitudinal timeline for a patient."""
@@ -510,6 +568,7 @@ class IngestionService(BaseService):
         summary: dict[str, Any],
         alerts: list[Any],
         name_validation: dict[str, Any],
+        imaging_result: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Structured high-level results for the review UI."""
         biomarkers = ocr_result.get("structured_data", {}).get("biomarkers", [])
@@ -526,7 +585,9 @@ class IngestionService(BaseService):
             "panel_coverage_pct": lab_analysis.get("panel_coverage_pct"),
             "summary_status": summary.get("status"),
             "alert_count": len(alerts) if isinstance(alerts, list) else 0,
-            "headline": self._results_headline(file_type, abnormal, normal, alerts),
+            "headline": self._results_headline(
+                file_type, abnormal, normal, alerts, imaging_result
+            ),
         }
 
     def _results_headline(
@@ -535,6 +596,7 @@ class IngestionService(BaseService):
         abnormal: int,
         normal: int,
         alerts: list[Any],
+        imaging_result: dict[str, Any] | None = None,
     ) -> str:
         """One-line clinical headline for the results overview."""
         if file_type == "lab_report":
@@ -543,6 +605,8 @@ class IngestionService(BaseService):
             if normal > 0:
                 return f"Good news: {normal} test result(s) look healthy based on standard ranges."
             return "Report uploaded — please ask your doctor to review the extracted values."
+        if file_type == "xray":
+            return format_imaging_summary(imaging_result or {"skipped": True})
         alert_count = len(alerts) if isinstance(alerts, list) else 0
         if alert_count:
             return f"{alert_count} reminder(s) added — please review with your doctor."
@@ -574,6 +638,10 @@ class IngestionService(BaseService):
         self, study: Any, inference: Any, encounter_id: uuid.UUID | None = None
     ) -> dict[str, Any] | None:
         """Serialize imaging ORM rows."""
+        from pathlib import Path
+
+        from backend.client.xray_inference_client import get_xray_inference_client
+
         if study is None:
             return None
         payload: dict[str, Any] = {
@@ -581,10 +649,43 @@ class IngestionService(BaseService):
             "storage_path": study.storage_path,
             "status": study.status,
         }
+        if encounter_id is not None:
+            payload["image_url"] = f"/api/clinical/encounters/{encounter_id}/image"
         if inference is not None:
             heatmap_url = None
-            if inference.heatmap_path and encounter_id is not None:
-                heatmap_url = f"/api/clinical/encounters/{encounter_id}/heatmap"
+            heatmap_exists = False
+            if inference.heatmap_path:
+                heatmap_exists = Path(inference.heatmap_path).is_file()
+                if heatmap_exists and encounter_id is not None:
+                    heatmap_url = f"/api/clinical/encounters/{encounter_id}/heatmap"
+
+            proof = {}
+            regions: list[dict[str, Any]] = []
+            if isinstance(inference.bounding_boxes, dict):
+                proof = inference.bounding_boxes.get("analysis_proof", {})
+                raw_regions = inference.bounding_boxes.get("regions", [])
+                if not raw_regions and isinstance(proof, dict):
+                    raw_regions = proof.get("regions", [])
+                if isinstance(raw_regions, list):
+                    regions = raw_regions
+
+            if not regions and study.storage_path:
+                from backend.utils.imaging_regions import derive_anomaly_regions
+
+                try:
+                    image_path = str(self._validate_storage_file(study.storage_path))
+                    regions = derive_anomaly_regions(
+                        image_path, inference.findings if inference else {}
+                    )
+                except Exception:
+                    regions = []
+
+            txrv = get_xray_inference_client()
+            engine = proof.get("engine") or (
+                "torchxrayvision"
+                if not str(inference.model_version).startswith("fallback")
+                else "fallback"
+            )
             payload.update(
                 {
                     "inference_id": str(inference.id),
@@ -593,6 +694,17 @@ class IngestionService(BaseService):
                     "heatmap_url": heatmap_url,
                     "confidence": inference.confidence_score,
                     "model_version": inference.model_version,
+                    "regions": regions,
+                    "proof": {
+                        "engine": engine,
+                        "txrv_installed": txrv.is_available,
+                        "model_version": inference.model_version,
+                        "heatmap_available": heatmap_exists,
+                        "study_status": study.status,
+                        "pathology_scores": proof.get("pathology_scores") or {},
+                        "is_fallback": engine == "fallback"
+                        or str(inference.model_version).startswith("fallback"),
+                    },
                 }
             )
         return payload

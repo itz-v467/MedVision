@@ -14,6 +14,7 @@ import { AppRoutes } from "../enums/routes";
 import { Messages } from "../enums/messages";
 import { usePermissions } from "../hooks/usePermissions";
 import { enrichBiomarkers } from "../utils/labInterpretation";
+import { buildEvidenceSources } from "../utils/evidenceFormat";
 import { plainDocType, UI_LABELS } from "../utils/plainLanguage";
 
 function primaryDocumentType(detail) {
@@ -25,6 +26,10 @@ function overallConfidence(detail) {
   const nlp = detail?.nlp?.confidence ?? 0;
   const imaging = detail?.imaging?.confidence ?? 0;
   const docType = primaryDocumentType(detail);
+  if (docType === "xray") {
+    if (imaging > 0) return imaging;
+    return ocr || null;
+  }
   if (docType === "lab_report" || docType === "clinical_note") {
     const score = ocr * 0.65 + nlp * 0.35;
     return score > 0 ? score : null;
@@ -42,52 +47,6 @@ function inferRisk(alerts) {
   if (alerts.some((a) => !a.is_acknowledged && (a.priority === "MODERATE" || a.priority === "MEDIUM")))
     return "moderate";
   return "low";
-}
-
-function buildEvidenceSources(detail) {
-  const sources = [];
-  const ocrData = detail?.ocr?.structured_data;
-  if (ocrData && Object.keys(ocrData).length) {
-    const preview = ocrData.raw_text_preview || ocrData.raw_text || "";
-    const biomarkerCount = ocrData.biomarkers?.length ?? 0;
-    sources.push({
-      id: "ocr",
-      label: "Document extraction (OCR)",
-      meta: `${biomarkerCount} biomarkers · ${((detail.ocr.confidence ?? 0) * 100).toFixed(0)}% confidence`,
-      snippet: preview || JSON.stringify(ocrData, null, 2).slice(0, 600),
-    });
-  }
-  if (detail?.nlp?.entities) {
-    const ents = detail.nlp.entities;
-    const count = Array.isArray(ents) ? ents.length : Object.keys(ents).length;
-    sources.push({
-      id: "nlp",
-      label: "Clinical NLP entities",
-      meta: `${count} entities · ICD-10 / SNOMED mapped`,
-      snippet: JSON.stringify(detail.nlp.entities, null, 2).slice(0, 400),
-    });
-  }
-  if (detail?.imaging?.findings) {
-    sources.push({
-      id: "imaging",
-      label: "Imaging AI analysis",
-      meta: `Model ${detail.imaging.model_version || "v1"}`,
-      snippet: JSON.stringify(detail.imaging.findings, null, 2).slice(0, 400),
-    });
-  }
-  const evidenceBundle = detail?.summary?.evidence_sources;
-  if (evidenceBundle && typeof evidenceBundle === "object") {
-    const chunkCount = Array.isArray(evidenceBundle.rag_chunks)
-      ? evidenceBundle.rag_chunks.length
-      : Object.keys(evidenceBundle).length;
-    sources.push({
-      id: "rag",
-      label: "Evidence retrieval (RAG)",
-      meta: `${chunkCount} retrieved source(s)`,
-      snippet: JSON.stringify(evidenceBundle, null, 2).slice(0, 500),
-    });
-  }
-  return sources;
 }
 
 export function ReviewPage() {
@@ -230,6 +189,8 @@ export function ReviewPage() {
       <ClinicalFindingsPanel
         summaryText={detail?.summary?.summary_text}
         labAnalysis={labAnalysis}
+        docType={docType}
+        imaging={detail?.imaging}
         confidence={confidence}
         isFinalized={detail?.summary?.status === "FINALIZED"}
         canReview={canReview}
@@ -237,7 +198,7 @@ export function ReviewPage() {
         finalizing={finalizing}
       />
 
-      {(docType === "lab_report" || biomarkers.length > 0) && (
+      {(docType === "lab_report" || (biomarkers.length > 0 && docType !== "xray")) && (
         <section className="cv-lab-panel" aria-labelledby="lab-results-heading">
           <LabResultsTable biomarkers={biomarkers} variant="clinical" />
         </section>
@@ -248,7 +209,7 @@ export function ReviewPage() {
         <section className="cv-section" aria-labelledby="evidence-heading">
           <h2 className="cv-section-title" id="evidence-heading">Supporting evidence</h2>
           <p className="cv-section-sub">
-            Trace each finding to its source. Select a node to view extracted references.
+            Each step explains what the system reviewed — in clinical language, not raw technical data.
           </p>
           <EvidenceChain
             sources={sources}
@@ -260,7 +221,12 @@ export function ReviewPage() {
       )}
 
       {/* Level 3 — Imaging validation */}
-      {hasImaging && <PremiumImagingViewer imaging={detail.imaging} />}
+      {hasImaging && (
+        <PremiumImagingViewer
+          imaging={detail.imaging}
+          fileName={detail?.documents?.[0]?.file_name}
+        />
+      )}
 
       {/* Active alerts */}
       {alerts.length > 0 && (

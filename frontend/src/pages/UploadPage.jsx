@@ -8,7 +8,7 @@ import {
   IntakeStepIndicator,
 } from "../components/intake/IntakeWizard";
 import { UI_LABELS } from "../utils/plainLanguage";
-import { suggestFileType, validateUpload } from "../utils/uploadValidation";
+import { suggestFileType, validateImageContent, validateUpload } from "../utils/uploadValidation";
 
 function validatePatientForm({ patientName, patientAge }) {
   const name = patientName.trim();
@@ -27,7 +27,8 @@ function validatePatientForm({ patientName, patientAge }) {
 export function UploadPage() {
   const [step, setStep] = useState(1);
   const [file, setFile] = useState(null);
-  const [fileType, setFileType] = useState("clinical_note");
+  const [fileType, setFileType] = useState("");
+  const [fileTypeLocked, setFileTypeLocked] = useState(false);
   const [patientName, setPatientName] = useState("");
   const [patientId, setPatientId] = useState("");
   const [previewId, setPreviewId] = useState("");
@@ -55,10 +56,16 @@ export function UploadPage() {
       return;
     }
     const suggested = suggestFileType(selected);
-    if (suggested && suggested !== fileType) {
+    if (!fileTypeLocked && suggested) {
       setFileType(suggested);
     }
     setFile(selected);
+    setError("");
+  };
+
+  const handleFileTypeChange = (nextType) => {
+    setFileType(nextType);
+    setFileTypeLocked(Boolean(nextType));
     setError("");
   };
 
@@ -101,11 +108,31 @@ export function UploadPage() {
       setError("Please select a clinical file.");
       return;
     }
+    if (!fileType) {
+      setError("Please select a document type before uploading.");
+      return;
+    }
 
     const validation = validateUpload(file, fileType);
     if (!validation.ok) {
       setError(validation.message);
-      if (validation.suggestedFileType) setFileType(validation.suggestedFileType);
+      if (!fileTypeLocked && validation.suggestedFileType) {
+        setFileType(validation.suggestedFileType);
+      }
+      return;
+    }
+
+    const contentValidation = await validateImageContent(file, fileType);
+    if (!contentValidation.ok) {
+      setError(contentValidation.message);
+      return;
+    }
+
+    const suggested = suggestFileType(file);
+    if (fileTypeLocked && suggested && suggested !== fileType) {
+      setError(
+        `This file looks like a ${suggested === "xray" ? "chest X-ray" : suggested === "lab_report" ? "lab report" : "clinical note"}, but you selected a different document type. Please fix the selection or choose another file.`
+      );
       return;
     }
 
@@ -157,6 +184,8 @@ export function UploadPage() {
     setIsExistingPatient(false);
     setPatientAge("");
     setPatientGender("");
+    setFileType("");
+    setFileTypeLocked(false);
     setError("");
     clinicalApi.previewPatientId()
       .then((data) => setPreviewId(data.patient_external_id || ""))
@@ -196,7 +225,7 @@ export function UploadPage() {
         <IntakeDocumentStep
           file={file}
           fileType={fileType}
-          setFileType={setFileType}
+          setFileType={handleFileTypeChange}
           inputRef={inputRef}
           onFileChange={handleFileChange}
           onDrop={handleDrop}

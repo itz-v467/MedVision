@@ -3,14 +3,20 @@ import { formatClinicalSummary } from "../../utils/clinicalSummaryFormat";
 export function ClinicalFindingsPanel({
   summaryText,
   labAnalysis,
+  docType,
+  imaging,
   confidence,
   isFinalized,
   canReview,
   onFinalize,
   finalizing,
 }) {
-  const formatted = formatClinicalSummary(summaryText, labAnalysis);
+  const formatted = formatClinicalSummary(summaryText, labAnalysis, { docType, imaging });
   const pct = confidence != null ? Math.round(confidence * 100) : null;
+  const confidenceCaption =
+    docType === "xray"
+      ? "Based on ChestNet image analysis signals."
+      : "Based on OCR, NLP, and document quality signals.";
 
   return (
     <section className="cv-findings-primary" aria-labelledby="findings-heading">
@@ -73,24 +79,26 @@ export function ClinicalFindingsPanel({
               <div className="cv-confidence-bar-fill" style={{ width: `${pct}%` }} />
             </div>
             <p style={{ margin: "12px 0 0", fontSize: "var(--cv-text-xs)", color: "var(--cv-slate-400)" }}>
-              Based on OCR, NLP, and document quality signals.
+              {confidenceCaption}
             </p>
           </div>
         )}
 
-        <NextStepsInline precautions={labAnalysis?.precautions || []} />
+        <NextStepsInline precautions={labAnalysis?.precautions || []} docType={docType} />
       </aside>
     </section>
   );
 }
 
-function NextStepsInline({ precautions }) {
+function NextStepsInline({ precautions, docType }) {
   if (!precautions.length) {
     return (
       <div className="cv-next-steps">
         <h3>Recommended next steps</h3>
         <p style={{ margin: 0, fontSize: "var(--cv-text-sm)", color: "var(--cv-slate-500)" }}>
-          No urgent actions. Correlate with clinical presentation and discuss at next visit.
+          {docType === "xray"
+            ? "Correlate the scan with symptoms and have a radiologist or physician review the image."
+            : "No urgent actions. Correlate with clinical presentation and discuss at next visit."}
         </p>
       </div>
     );

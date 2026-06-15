@@ -27,40 +27,53 @@ export function EncountersTable({ encounters, onDeleted }) {
   };
 
   return (
-    <div>
+    <div className="cv-encounters-wrap">
       {error && <div className="error-banner">{error}</div>}
-      <table className="data-table">
-        <thead>
-          <tr>
-            <th>Patient</th>
-            <th>Patient ID</th>
-            <th>Status</th>
-            <th>Uploaded</th>
-            <th>Actions</th>
-          </tr>
-        </thead>
-        <tbody>
-          {encounters.map((encounter) => (
-            <tr key={encounter.id}>
-              <td>{encounter.patient_name || "Unknown"}</td>
-              <td>{encounter.patient_external_id || "—"}</td>
-              <td>{plainStatus(encounter.status)}</td>
-              <td>{new Date(encounter.created_at).toLocaleString()}</td>
-              <td className="table-actions">
-                <Link to={`${AppRoutes.REVIEW}/${encounter.id}`}>Open report</Link>
-                <button
-                  type="button"
-                  className="btn-delete"
-                  onClick={() => handleDelete(encounter)}
-                  disabled={deletingId === encounter.id}
-                >
-                  {deletingId === encounter.id ? "Removing…" : UI_LABELS.deleteRecord}
-                </button>
-              </td>
+      <div className="cv-encounters-table-scroll">
+        <table className="cv-encounters-table">
+          <thead>
+            <tr>
+              <th>Patient</th>
+              <th>Patient ID</th>
+              <th>Status</th>
+              <th>Uploaded</th>
+              <th className="cv-encounters-th-actions">Actions</th>
             </tr>
-          ))}
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            {encounters.map((encounter) => (
+              <tr key={encounter.id}>
+                <td className="cv-encounters-patient">{encounter.patient_name || "Unknown"}</td>
+                <td className="cv-encounters-id">{encounter.patient_external_id || "—"}</td>
+                <td>
+                  <span className="cv-encounters-status">{plainStatus(encounter.status)}</span>
+                </td>
+                <td className="cv-encounters-date">
+                  {new Date(encounter.created_at).toLocaleString()}
+                </td>
+                <td>
+                  <div className="cv-table-actions">
+                    <Link
+                      to={`${AppRoutes.REVIEW}/${encounter.id}`}
+                      className="cv-btn cv-btn-sm cv-btn-table-primary"
+                    >
+                      Open
+                    </Link>
+                    <button
+                      type="button"
+                      className="cv-btn cv-btn-sm cv-btn-table-danger"
+                      onClick={() => handleDelete(encounter)}
+                      disabled={deletingId === encounter.id}
+                    >
+                      {deletingId === encounter.id ? "Removing…" : "Remove"}
+                    </button>
+                  </div>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }

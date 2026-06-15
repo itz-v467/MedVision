@@ -58,11 +58,23 @@ class ImagingAiService(BaseService):
         findings = prediction["findings"]
         confidence = prediction["confidence"]
         heatmap_path = prediction.get("heatmap_path")
+        regions = prediction.get("regions") or []
 
         inference = InferenceResultModel(
             imaging_study_id=study.id,
             findings=findings,
-            bounding_boxes={},
+            bounding_boxes={
+                "regions": regions,
+                "analysis_proof": {
+                    "engine": prediction.get("engine", "unknown"),
+                    "txrv_available": self._xray.is_available,
+                    "model_version": prediction.get(
+                        "model_version", model.get("version", "1.0.0")
+                    ),
+                    "pathology_scores": prediction.get("pathology_scores") or {},
+                    "regions": regions,
+                },
+            },
             heatmap_path=heatmap_path,
             confidence_score=confidence,
             model_version=prediction.get(
@@ -81,6 +93,7 @@ class ImagingAiService(BaseService):
             "confidence": confidence,
             "skipped": False,
             "latency_ms": latency_ms,
+            "regions": regions,
         }
 
     def _should_run_imaging(self, mime_type: str, file_type: str) -> bool:

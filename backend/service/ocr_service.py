@@ -28,6 +28,23 @@ from backend.utils.exceptions import AiProcessingException
 
 logger = get_logger()
 
+IMAGE_MIME_TYPES = {"image/png", "image/jpeg"}
+EMPTY_LAB_ANALYSIS = {
+    "precautions": [],
+    "wellness_notes": [],
+    "panel_coverage_pct": 0.0,
+    "missing_core_tests": [],
+    "clinical_summary": "",
+    "abnormal_count": 0,
+    "normal_count": 0,
+    "total_parsed": 0,
+    "disclaimer": (
+        "Chest X-ray image — blood panel parsing does not apply. "
+        "Review imaging AI findings instead."
+    ),
+    "llm_extraction": {"used": False},
+}
+
 
 class OcrService(BaseService):
     """Extracts structured data from lab and report documents."""
@@ -67,45 +84,57 @@ class OcrService(BaseService):
             )
 
         raw_text = clean_ocr_lab_text(raw_text)
-        lab_analysis = LabAnalysisService().analyze_text(raw_text)
-        pipeline_debug(
-            "ocr",
-            "Lab analysis finished",
-            biomarkers=lab_analysis.get("total_parsed", 0),
-            abnormal=lab_analysis.get("abnormal_count", 0),
-        )
-        biomarkers = lab_analysis["biomarkers"]
         warning = extraction_warning_for_text(
             raw_text, document.mime_type, extraction_method
         )
-        structured_data = {
-            "patient_demographics": extract_patient_demographics(raw_text),
-            "biomarkers": lab_analysis["biomarkers"],
-            "lab_analysis": {
-                "precautions": lab_analysis["precautions"],
-                "wellness_notes": lab_analysis["wellness_notes"],
-                "panel_coverage_pct": lab_analysis["panel_coverage_pct"],
-                "missing_core_tests": lab_analysis["missing_core_tests"],
-                "clinical_summary": lab_analysis["clinical_summary"],
-                "abnormal_count": lab_analysis["abnormal_count"],
-                "normal_count": lab_analysis["normal_count"],
-                "total_parsed": lab_analysis["total_parsed"],
-                "disclaimer": lab_analysis["disclaimer"],
-                "llm_extraction": lab_analysis.get("llm_extraction", {}),
-            },
-            "raw_text": raw_text,
-            "raw_text_preview": raw_text[:2000] if raw_text else "",
-            "chars_extracted": len(raw_text),
-            "extraction_method": extraction_method,
-            "extraction_warning": warning,
-            "ocr_engines_available": get_ocr_capabilities(),
-            "model_version": model.get("version", "1.0.0"),
-        }
-        confidence = text_confidence
-        if biomarkers:
-            confidence = min(confidence + 0.1, 0.95)
-        elif warning:
-            confidence = min(confidence, 0.35)
+
+        if document.file_type == "xray":
+            structured_data = self._build_imaging_ocr_payload(
+                raw_text=raw_text,
+                text_confidence=text_confidence,
+                extraction_method=extraction_method,
+                warning=warning,
+                model_version=model.get("version", "1.0.0"),
+            )
+            biomarkers: list[dict[str, Any]] = []
+            confidence = text_confidence if raw_text.strip() else 0.25
+        else:
+            lab_analysis = LabAnalysisService().analyze_text(raw_text)
+            pipeline_debug(
+                "ocr",
+                "Lab analysis finished",
+                biomarkers=lab_analysis.get("total_parsed", 0),
+                abnormal=lab_analysis.get("abnormal_count", 0),
+            )
+            biomarkers = lab_analysis["biomarkers"]
+            structured_data = {
+                "patient_demographics": extract_patient_demographics(raw_text),
+                "biomarkers": lab_analysis["biomarkers"],
+                "lab_analysis": {
+                    "precautions": lab_analysis["precautions"],
+                    "wellness_notes": lab_analysis["wellness_notes"],
+                    "panel_coverage_pct": lab_analysis["panel_coverage_pct"],
+                    "missing_core_tests": lab_analysis["missing_core_tests"],
+                    "clinical_summary": lab_analysis["clinical_summary"],
+                    "abnormal_count": lab_analysis["abnormal_count"],
+                    "normal_count": lab_analysis["normal_count"],
+                    "total_parsed": lab_analysis["total_parsed"],
+                    "disclaimer": lab_analysis["disclaimer"],
+                    "llm_extraction": lab_analysis.get("llm_extraction", {}),
+                },
+                "raw_text": raw_text,
+                "raw_text_preview": raw_text[:2000] if raw_text else "",
+                "chars_extracted": len(raw_text),
+                "extraction_method": extraction_method,
+                "extraction_warning": warning,
+                "ocr_engines_available": get_ocr_capabilities(),
+                "model_version": model.get("version", "1.0.0"),
+            }
+            confidence = text_confidence
+            if biomarkers:
+                confidence = min(confidence + 0.1, 0.95)
+            elif warning:
+                confidence = min(confidence, 0.35)
 
         latency_ms = (time.perf_counter() - start) * 1000
 
@@ -123,4 +152,34 @@ class OcrService(BaseService):
             "structured_data": structured_data,
             "raw_text": raw_text,
             "latency_ms": latency_ms,
+        }
+
+    def _build_imaging_ocr_payload(
+        self,
+        *,
+        raw_text: str,
+        text_confidence: float,
+        extraction_method: str,
+        warning: str | None,
+        model_version: str,
+    ) -> dict[str, Any]:
+        """Minimal OCR payload for chest X-ray uploads (no blood panel parsing)."""
+        imaging_warning = warning
+        if not raw_text.strip():
+            imaging_warning = (
+                "Chest X-ray image uploaded. Text OCR is limited on scans — "
+                "review uses ChestNet image analysis instead."
+            )
+        return {
+            "patient_demographics": extract_patient_demographics(raw_text) if raw_text else {},
+            "biomarkers": [],
+            "lab_analysis": dict(EMPTY_LAB_ANALYSIS),
+            "raw_text": raw_text,
+            "raw_text_preview": raw_text[:2000] if raw_text else "",
+            "chars_extracted": len(raw_text),
+            "extraction_method": extraction_method,
+            "extraction_warning": imaging_warning,
+            "ocr_engines_available": get_ocr_capabilities(),
+            "model_version": model_version,
+            "document_mode": "xray",
         }

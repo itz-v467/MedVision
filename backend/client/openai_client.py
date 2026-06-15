@@ -85,7 +85,7 @@ class OpenAiClient(SingletonMixin):
                     {"role": "system", "content": SUMMARY_SYSTEM_PROMPT},
                     {"role": "user", "content": prompt},
                 ],
-                temperature=0.2,
+                temperature=0.0,
                 max_tokens=500,
             )
             content = response.choices[0].message.content or ""
@@ -133,11 +133,13 @@ class OpenAiClient(SingletonMixin):
         """Template summary when OpenAI is unavailable."""
         file_type = context.get("file_type", "")
         is_lab = file_type in {"lab_report", "clinical_note"}
+        is_xray = file_type == "xray"
 
-        imaging = context.get("imaging", {}).get("findings", {})
+        imaging = context.get("imaging", {}) or {}
+        imaging_findings = imaging.get("findings", {})
         detected = [
             name
-            for name, data in imaging.items()
+            for name, data in imaging_findings.items()
             if isinstance(data, dict) and data.get("detected")
         ]
         ocr_data = context.get("ocr", {}).get("structured_data", {})
@@ -146,6 +148,27 @@ class OpenAiClient(SingletonMixin):
         warning = ocr_data.get("extraction_warning")
         nlp_entities = context.get("nlp", {}).get("entities", {}) or {}
         diseases = nlp_entities.get("diseases", []) if isinstance(nlp_entities, dict) else []
+
+        if is_xray:
+            parts = ["AI-assisted chest X-ray summary:"]
+            if warning:
+                parts.append(warning)
+            if lab_analysis.get("clinical_summary"):
+                parts.append(lab_analysis["clinical_summary"])
+            elif detected:
+                parts.append(f"Imaging flags: {', '.join(detected)}.")
+            else:
+                parts.append(
+                    "No findings exceeded automatic detection threshold. "
+                    "Physician review still required."
+                )
+            parts.append("Correlate with clinical presentation.")
+            parts.append("Physician review required before finalization.")
+            if grounded_chunks:
+                parts.append(
+                    f"Grounded on {len(grounded_chunks)} vector-retrieved sources."
+                )
+            return " ".join(parts)
 
         parts = ["AI-assisted summary:"]
         if warning:

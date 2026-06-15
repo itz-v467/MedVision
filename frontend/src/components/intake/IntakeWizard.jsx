@@ -1,6 +1,7 @@
 import { Link } from "react-router-dom";
 import { PatientIdBadge, PatientSearchBar } from "../patients/PatientSearchBar";
 import { AppRoutes } from "../../enums/routes";
+import { suggestFileType, fileTypeLabel } from "../../utils/uploadValidation";
 import { UI_LABELS } from "../../utils/plainLanguage";
 
 const STEPS = [
@@ -135,6 +136,18 @@ export function IntakeDocumentStep({
   error,
   patientLabel,
 }) {
+  const suggestedType = file ? suggestFileType(file) : null;
+  const typeMismatch =
+    file && suggestedType && fileType && suggestedType !== fileType
+      ? `This file looks like a ${fileTypeLabel(suggestedType).toLowerCase()}, but you selected ${fileTypeLabel(fileType).toLowerCase()}. Change the document type or choose a different file.`
+      : null;
+  const typeHint =
+    typeMismatch
+      ? null
+      : file && suggestedType === "xray" && fileType === "xray"
+        ? "Chest X-ray selected — ChestNet image analysis will run."
+        : null;
+
   return (
     <form className="cv-intake-card" onSubmit={onSubmit}>
       <div className="cv-form-section">
@@ -152,12 +165,17 @@ export function IntakeDocumentStep({
             id="file-type-select"
             value={fileType}
             onChange={(e) => setFileType(e.target.value)}
+            required
           >
+            <option value="">Select document type…</option>
             <option value="clinical_note">Clinical note (TXT)</option>
             <option value="lab_report">Lab report (PDF / CSV / photo)</option>
             <option value="xray">Chest X-ray (PNG / JPG)</option>
           </select>
         </div>
+
+        {typeMismatch && <p className="cv-intake-type-hint cv-intake-type-warning">{typeMismatch}</p>}
+        {typeHint && <p className="cv-intake-type-hint">{typeHint}</p>}
 
         <div
           className="cv-dropzone"
@@ -192,7 +210,7 @@ export function IntakeDocumentStep({
         <button type="button" className="cv-btn cv-btn-secondary" onClick={onBack}>
           ← Back
         </button>
-        <button type="submit" className="cv-btn cv-btn-primary" disabled={loading || !file}>
+        <button type="submit" className="cv-btn cv-btn-primary" disabled={loading || !file || !fileType}>
           {loading ? "Starting analysis…" : "Begin AI analysis"}
         </button>
       </div>

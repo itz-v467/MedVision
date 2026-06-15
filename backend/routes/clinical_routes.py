@@ -35,7 +35,7 @@ async def upload(
     file: UploadFile = File(...),
     patient_external_id: str = Form("AUTO"),
     patient_name: str = Form("Unknown Patient"),
-    file_type: str = Form("lab_report"),
+    file_type: str = Form(...),
     patient_age: str = Form(None),
     patient_gender: str = Form(None),
 ):
@@ -125,3 +125,12 @@ def encounter_heatmap(
 ):
     """Explainability heatmap PNG for an encounter."""
     return _controller.get_encounter_heatmap(encounter_id)
+
+
+@router.get("/encounters/{encounter_id}/image")
+def encounter_image(
+    encounter_id: uuid.UUID,
+    _user: CurrentUser = Depends(get_current_user),
+):
+    """Source uploaded image (chest X-ray) for an encounter."""
+    return _controller.get_encounter_image(encounter_id)

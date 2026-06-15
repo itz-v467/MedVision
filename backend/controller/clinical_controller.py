@@ -15,6 +15,7 @@ from backend.service.ingestion_service import IngestionService
 from backend.service.patient_search_service import PatientSearchService
 from backend.utils.patient_id_generator import generate_patient_external_id
 from backend.utils.exceptions import ValidationException
+from backend.utils.upload_validation import normalize_file_type
 from backend.utils.response_builder import ResponseBuilder
 
 
@@ -42,6 +43,7 @@ class ClinicalController(BaseController):
         content = await file.read()
         file_stream = io.BytesIO(content)
         mime_type = file.content_type or "application/octet-stream"
+        file_type = normalize_file_type(file_type)
 
         with get_database_manager().session_scope() as session:
             result = IngestionService(session).upload_and_process(
@@ -124,6 +126,14 @@ class ClinicalController(BaseController):
         with get_database_manager().session_scope() as session:
             path = IngestionService(session).get_heatmap_path(encounter_id)
         return FileResponse(path, media_type="image/png")
+
+    def get_encounter_image(self, encounter_id: uuid.UUID) -> FileResponse:
+        """Return source uploaded image for an encounter."""
+        with get_database_manager().session_scope() as session:
+            path, media_type = IngestionService(session).get_source_image_path(
+                encounter_id
+            )
+        return FileResponse(path, media_type=media_type)
 
     def get_task_status(self, task_id: str) -> JSONResponse:
         """Return status of a celery background task."""

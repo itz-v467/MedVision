@@ -70,6 +70,11 @@ class AppFactory:
             """OCR engine availability check."""
             return health_api.ocr_status()
 
+        @self._app.get("/health/imaging", tags=["Health"])
+        def imaging_health():
+            """Chest X-ray AI stack availability check."""
+            return health_api.imaging_status()
+
     def _ensure_database(self) -> None:
         """Create tables for non-production environments."""
         if get_settings().is_production:

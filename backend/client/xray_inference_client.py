@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import importlib.util
+import hashlib
 import os
 from typing import Any
 
 from backend.config import get_settings
 from backend.core.singleton import SingletonMixin
 from backend.logger import get_logger
+from backend.utils.imaging_regions import derive_anomaly_regions
 
 logger = get_logger()
 
@@ -134,6 +136,7 @@ class XrayInferenceClient(SingletonMixin):
         findings = self._map_findings(pathology_scores, threshold)
         confidence = max(finding["probability"] for finding in findings.values())
         heatmap_path = self._save_intensity_heatmap(image_path, img)
+        regions = derive_anomaly_regions(image_path, findings)
 
         return {
             "findings": findings,
@@ -141,6 +144,8 @@ class XrayInferenceClient(SingletonMixin):
             "model_version": self._settings.imaging_model_name,
             "heatmap_path": heatmap_path,
             "pathology_scores": pathology_scores,
+            "engine": "torchxrayvision",
+            "regions": regions,
         }
 
     def _map_findings(
@@ -181,7 +186,7 @@ class XrayInferenceClient(SingletonMixin):
 
     def _fallback_prediction(self, image_path: str) -> dict[str, Any]:
         """Deterministic fallback when ML stack is unavailable."""
-        seed = sum(image_path.encode("utf-8")) % 1000
+        seed = self._stable_seed(image_path)
         base = 0.15 + (seed % 50) / 100.0
         findings = {
             "pneumothorax": {
@@ -206,13 +211,45 @@ class XrayInferenceClient(SingletonMixin):
             },
         }
         confidence = max(item["probability"] for item in findings.values())
+        heatmap_path = self._save_simple_heatmap(image_path)
+        regions = derive_anomaly_regions(image_path, findings)
         return {
             "findings": findings,
             "confidence": round(confidence, 4),
             "model_version": "fallback-1.0.0",
-            "heatmap_path": None,
+            "heatmap_path": heatmap_path,
             "pathology_scores": {},
+            "engine": "fallback",
+            "regions": regions,
         }
+
+    def _stable_seed(self, image_path: str) -> int:
+        """Derive deterministic seed from file bytes, not storage path."""
+        try:
+            with open(image_path, "rb") as handle:
+                digest = hashlib.sha256(handle.read()).hexdigest()
+            return int(digest[:8], 16) % 1000
+        except Exception:
+            # fallback to path-based seed only if file cannot be read
+            return sum(image_path.encode("utf-8")) % 1000
+
+    def _save_simple_heatmap(self, image_path: str) -> str | None:
+        """Build a grayscale intensity map without TorchXRayVision."""
+        try:
+            from PIL import Image
+            import numpy as np
+
+            img = Image.open(image_path).convert("L")
+            arr = np.asarray(img, dtype=np.float32)
+            arr = arr - arr.min()
+            if arr.max() > 0:
+                arr = arr / arr.max()
+            output_path = f"{image_path}.heatmap.png"
+            Image.fromarray((arr * 255).astype(np.uint8)).save(output_path)
+            return output_path
+        except Exception as exc:
+            logger.warning("Fallback heatmap generation failed: %s", exc)
+            return None
 
 
 def get_xray_inference_client() -> XrayInferenceClient:

@@ -30,3 +30,21 @@ class HealthApi:
                 ),
             }
         )
+
+    def imaging_status(self):
+        """Return chest X-ray AI stack availability for operator diagnostics."""
+        from backend.client.xray_inference_client import get_xray_inference_client
+
+        client = get_xray_inference_client()
+        return ResponseBuilder.success(
+            {
+                "imaging_ready": client.is_available,
+                "engine": "torchxrayvision" if client.is_available else "fallback",
+                "hint": (
+                    "TorchXRayVision is installed — ChestNet DenseNet inference enabled."
+                    if client.is_available
+                    else "Install ML stack: pip install -r backend/requirements-ml.txt "
+                    "(torch, torchxrayvision). Fallback scoring is active."
+                ),
+            }
+        )

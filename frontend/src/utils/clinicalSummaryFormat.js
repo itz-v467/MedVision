@@ -1,16 +1,23 @@
 /** Turn dense AI summary text into scannable patient-friendly bullets. */
 
-export function formatClinicalSummary(summaryText = "", labAnalysis = null) {
+export function formatClinicalSummary(summaryText = "", labAnalysis = null, options = {}) {
+  const { docType, imaging } = options;
   const precautions = labAnalysis?.precautions || [];
   const wellness = labAnalysis?.wellness_notes || [];
 
-  const headline =
+  let headline =
     labAnalysis?.clinical_summary?.split(".")[0] ||
     (precautions.length
-      ? `${precautions.length} test result(s) need your doctor's attention.`
+      ? `${precautions.length} result(s) need your doctor's attention.`
       : wellness.length
         ? "Your lab results look healthy based on standard ranges."
         : "Your report has been reviewed.");
+
+  if (docType === "xray") {
+    headline =
+      labAnalysis?.clinical_summary?.split(".")[0] ||
+      formatImagingHeadline(imaging);
+  }
 
   const attention = precautions.map((p) => ({
     test: p.test,
@@ -40,6 +47,32 @@ export function formatClinicalSummary(summaryText = "", labAnalysis = null) {
     doctorNote,
     showFullNote: Boolean(doctorNote && doctorNote.length > 50),
   };
+}
+
+const IMAGING_LABELS = {
+  pneumothorax: "Pneumothorax",
+  opacity: "Lung opacity / pneumonia",
+  pleural_effusion: "Pleural effusion",
+  nodule: "Lung nodule",
+  cardiomegaly: "Enlarged heart",
+};
+
+export function formatImagingHeadline(imaging) {
+  if (!imaging || imaging.skipped) {
+    return "Chest X-ray uploaded — imaging analysis did not run.";
+  }
+  const findings = imaging.findings || {};
+  const flagged = Object.entries(findings)
+    .filter(([, data]) => data?.detected || (data?.probability ?? 0) >= 0.4)
+    .map(([key, data]) => {
+      const label = IMAGING_LABELS[key] || key.replace(/_/g, " ");
+      const pct = Math.round((data.probability ?? 0) * 100);
+      return `${label} (${pct}%)`;
+    });
+  if (flagged.length) {
+    return `Chest X-ray: ${flagged.slice(0, 3).join(", ")} — physician review required`;
+  }
+  return "Chest X-ray: no major flags from automatic review — doctor should still confirm";
 }
 
 export function identityStatus(validation) {
