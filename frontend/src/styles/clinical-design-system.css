@@ -939,7 +939,10 @@ body {
   align-items: center;
 }
 
-.cv-patient-search-badge {
+.cv-patient-search-badge.is-keyword {
+  background: var(--cv-slate-100);
+  color: var(--cv-slate-700);
+}
   background: var(--cv-primary-muted);
   color: var(--cv-primary);
   padding: 1px 6px;
@@ -2185,4 +2188,131 @@ body {
   font-size: var(--cv-text-xs);
   color: var(--cv-slate-500);
   margin-top: 2px;
+}
+
+/* Unified case intake slots */
+.cv-intake-slots {
+  display: grid;
+  gap: var(--cv-space-3);
+  margin-top: var(--cv-space-3);
+}
+
+.cv-intake-slot-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.cv-intake-slot-hint {
+  font-size: var(--cv-text-xs);
+  color: var(--cv-slate-500);
+}
+
+.cv-dropzone-compact {
+  min-height: 88px;
+  padding: var(--cv-space-2);
+}
+
+.cv-dropzone-compact.has-file {
+  border-color: var(--cv-primary);
+  background: rgba(15, 76, 129, 0.04);
+}
+
+.cv-intake-manifest {
+  margin-top: var(--cv-space-3);
+  padding: var(--cv-space-2);
+  background: var(--cv-slate-50);
+  border-radius: var(--cv-radius);
+  font-size: var(--cv-text-sm);
+}
+
+/* Correlation + imaging status */
+.cv-correlation-grid {
+  display: grid;
+  gap: var(--cv-space-2);
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+}
+
+.cv-correlation-card {
+  border: 1px solid var(--cv-border);
+  border-radius: var(--cv-radius);
+  padding: var(--cv-space-3);
+  background: #fff;
+}
+
+.cv-correlation-card.is-alert {
+  border-color: var(--cv-warning);
+  background: #fffbeb;
+}
+
+.cv-correlation-card-title {
+  font-size: var(--cv-text-sm);
+  font-weight: 700;
+  margin: 0 0 4px;
+}
+
+.cv-correlation-card-value {
+  margin: 0;
+  font-weight: 600;
+}
+
+.cv-correlation-card-note {
+  margin: 8px 0 0;
+  font-size: var(--cv-text-sm);
+  color: var(--cv-slate-600);
+}
+
+.cv-correlation-score {
+  margin-top: var(--cv-space-2);
+  font-size: var(--cv-text-sm);
+  color: var(--cv-slate-500);
+}
+
+.cv-case-badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--cv-primary);
+  color: #fff;
+  font-size: var(--cv-text-xs);
+  font-weight: 600;
+}
+
+.cv-document-manifest {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 8px;
+}
+
+.cv-document-manifest li {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  padding: var(--cv-space-2);
+  border: 1px solid var(--cv-border);
+  border-radius: var(--cv-radius);
+  font-size: var(--cv-text-sm);
+}
+
+.cv-imaging-status {
+  margin-bottom: var(--cv-space-2);
+  padding: var(--cv-space-2) var(--cv-space-3);
+  border-radius: var(--cv-radius);
+  font-size: var(--cv-text-sm);
+  background: var(--cv-slate-50);
+  border: 1px solid var(--cv-border);
+}
+
+.cv-imaging-status.is-ok {
+  border-color: var(--cv-success);
+  background: #ecfdf5;
+}
+
+.cv-imaging-status.is-warn {
+  border-color: var(--cv-warning);
+  background: #fffbeb;
 }

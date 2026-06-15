@@ -38,8 +38,11 @@ class ImagingAiService(BaseService):
         storage_path: str,
         mime_type: str = "image/jpeg",
         file_type: str = "xray",
+        source_document_id: uuid.UUID | None = None,
     ) -> dict[str, Any]:
         """Run imaging inference pipeline."""
+        from backend.utils.storage_paths import resolve_storage_file_optional
+
         start = time.perf_counter()
         model = self._model_loader.get_model(ModelType.IMAGING)
         logger.info("Imaging inference started | encounter=%s", encounter_id)
@@ -47,14 +50,18 @@ class ImagingAiService(BaseService):
         if not self._should_run_imaging(mime_type, file_type):
             return self._skipped_result(start)
 
+        resolved = resolve_storage_file_optional(storage_path)
+        predict_path = str(resolved) if resolved else storage_path
+
         study = ImagingStudyModel(
             encounter_id=encounter_id,
             storage_path=storage_path,
+            source_document_id=source_document_id,
             status=AiProcessingStatus.PROCESSING.value,
         )
         self._dao.create_imaging_study(study)
 
-        prediction = self._xray.predict(storage_path)
+        prediction = self._xray.predict(predict_path)
         findings = prediction["findings"]
         confidence = prediction["confidence"]
         heatmap_path = prediction.get("heatmap_path")

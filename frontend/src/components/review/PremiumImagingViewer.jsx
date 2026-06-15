@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { ClinicalBlobImage } from "./ClinicalBlobImage";
 import { ImagingFindingsTable } from "../ImagingFindingsTable";
 
@@ -19,16 +19,38 @@ function ProofRow({ label, value, tone }) {
   );
 }
 
+function imagingStatusMessage(status) {
+  const map = {
+    ready: "Imaging localization ready — anomaly box aligned to the scan.",
+    no_regions: "Scan analyzed but no anomaly box was returned. Re-upload or check server logs.",
+    image_load_failed: "Source image could not be loaded — box cannot be shown.",
+    skipped: "Imaging was skipped for this encounter (not a chest X-ray case).",
+  };
+  return map[status] || "Imaging status unknown.";
+}
+
+function imagingStatusTone(status) {
+  if (status === "ready") return "ok";
+  if (status === "skipped") return undefined;
+  return "warn";
+}
+
 export function PremiumImagingViewer({ imaging, fileName }) {
   const [heatmapOpacity, setHeatmapOpacity] = useState(45);
   const [showHeatmap, setShowHeatmap] = useState(true);
   const [showRegions, setShowRegions] = useState(true);
   const [zoom, setZoom] = useState(1);
   const [sourceLoaded, setSourceLoaded] = useState(false);
+  const [imageLoadFailed, setImageLoadFailed] = useState(false);
   const [frameSize, setFrameSize] = useState(null);
+  const stackRef = useRef(null);
+  const imageRef = useRef(null);
 
   const proof = imaging?.proof || {};
   const regions = Array.isArray(imaging?.regions) ? imaging.regions : [];
+  const imagingStatus = imaging?.imaging_status || proof.imaging_status || (
+    regions.length ? "ready" : sourceLoaded ? "no_regions" : imageLoadFailed ? "image_load_failed" : undefined
+  );
   const findings = useMemo(
     () =>
       imaging?.findings
@@ -38,6 +60,32 @@ export function PremiumImagingViewer({ imaging, fileName }) {
         : [],
     [imaging?.findings]
   );
+
+  const syncFrameFromImage = (img) => {
+    if (!img) return;
+    imageRef.current = img;
+    setFrameSize({ width: img.clientWidth, height: img.clientHeight });
+  };
+
+  useEffect(() => {
+    const img = imageRef.current;
+    const stack = stackRef.current;
+    if (!img || !stack) return undefined;
+
+    const update = () => syncFrameFromImage(img);
+    update();
+
+    const observer = typeof ResizeObserver !== "undefined"
+      ? new ResizeObserver(update)
+      : null;
+    observer?.observe(img);
+    window.addEventListener("resize", update);
+
+    return () => {
+      observer?.disconnect();
+      window.removeEventListener("resize", update);
+    };
+  }, [sourceLoaded, imaging?.image_url]);
 
   if (!imaging) return null;
 
@@ -53,6 +101,13 @@ export function PremiumImagingViewer({ imaging, fileName }) {
       <p className="cv-section-sub">
         The red box marks where the AI found the strongest abnormality. Use the heatmap overlay to compare intensity.
       </p>
+
+      {imagingStatus && (
+        <div className={`cv-imaging-status is-${imagingStatusTone(imagingStatus) || "neutral"}`}>
+          <strong>Imaging status:</strong> {imagingStatus.replace(/_/g, " ")}
+          <span> — {imagingStatusMessage(imagingStatus)}</span>
+        </div>
+      )}
 
       <div className="cv-imaging-proof">
         <h3 className="cv-imaging-proof-title">Analysis proof</h3>
@@ -93,6 +148,11 @@ export function PremiumImagingViewer({ imaging, fileName }) {
             tone={detected.length ? "alert" : "ok"}
           />
           <ProofRow
+            label="Imaging status"
+            value={imagingStatus ? imagingStatus.replace(/_/g, " ") : "—"}
+            tone={imagingStatusTone(imagingStatus)}
+          />
+          <ProofRow
             label="Marked disease area"
             value={regions.length ? `${regions.length} region(s) highlighted` : "No region returned"}
             tone={regions.length ? "ok" : "warn"}
@@ -117,6 +177,7 @@ export function PremiumImagingViewer({ imaging, fileName }) {
           }}
         >
           <div
+            ref={stackRef}
             className="cv-imaging-stack"
             style={
               frameSize
@@ -129,13 +190,12 @@ export function PremiumImagingViewer({ imaging, fileName }) {
               alt="Uploaded chest X-ray"
               className="cv-imaging-source"
               emptyMessage="Source X-ray could not be loaded from the server."
-              onLoaded={() => setSourceLoaded(true)}
-              onImageLayout={(img) => {
-                setFrameSize({
-                  width: img.clientWidth,
-                  height: img.clientHeight,
-                });
+              onLoaded={() => {
+                setSourceLoaded(true);
+                setImageLoadFailed(false);
               }}
+              onError={() => setImageLoadFailed(true)}
+              onImageLayout={(img) => syncFrameFromImage(img)}
             />
             {imaging.heatmap_url && (
               <ClinicalBlobImage

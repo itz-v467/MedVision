@@ -36,6 +36,40 @@ def test_patient_text_search(app):
     assert hits[0]["external_id"] == "MV-20260101-0001"
 
 
+def test_patient_search_ignores_irrelevant_vector_hits(app):
+    """Keyword search should not return unrelated patients as AI matches."""
+    suffix = uuid.uuid4().hex[:6]
+    with get_database_manager().session_scope() as session:
+        session.add(
+            PatientModel(
+                external_id=f"MV-TEST-{suffix}-001",
+                full_name="kartik",
+                gender="Female",
+            )
+        )
+        session.add(
+            PatientModel(
+                external_id=f"MV-TEST-{suffix}-002",
+                full_name="atharva",
+                gender="Male",
+            )
+        )
+        session.add(
+            PatientModel(
+                external_id=f"MV-TEST-{suffix}-003",
+                full_name="raj",
+                gender="Male",
+            )
+        )
+        session.flush()
+        hits = PatientSearchService(session).search("kartik", limit=10)
+
+    names = {hit["full_name"] for hit in hits}
+    assert "kartik" in names
+    assert "atharva" not in names
+    assert "raj" not in names
+
+
 def test_patient_search_endpoint(client, app):
     with get_database_manager().session_scope() as session:
         session.add(

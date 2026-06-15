@@ -111,16 +111,19 @@ class OpenAiClient(SingletonMixin):
             "Generate a structured clinical summary for physician review "
             "using this data.\n\n"
         )
+        case_type = context.get("case_type", context.get("file_type", ""))
         closing = (
             "Include key findings, suggested correlation, "
             "and explicit physician review note."
         )
         return (
             f"{intro}"
+            f"Case type: {case_type}\n"
+            f"Document manifest: {context.get('document_manifest', [])}\n"
             f"OCR/Labs: {context.get('ocr', {})}\n"
             f"NLP entities: {context.get('nlp', {})}\n"
             f"Imaging findings: {context.get('imaging', {})}\n"
-            f"Correlation score: {context.get('correlation', {})}\n\n"
+            f"Correlation: {context.get('correlation', {})}\n\n"
             f"Retrieved evidence chunks:\n{chunk_text or 'None'}\n\n"
             f"{closing}"
         )
@@ -132,8 +135,10 @@ class OpenAiClient(SingletonMixin):
     ) -> str:
         """Template summary when OpenAI is unavailable."""
         file_type = context.get("file_type", "")
-        is_lab = file_type in {"lab_report", "clinical_note"}
-        is_xray = file_type == "xray"
+        case_type = context.get("case_type", file_type)
+        is_lab = file_type in {"lab_report", "clinical_note"} or case_type == "single_lab"
+        is_xray = file_type == "xray" or case_type == "single_xray"
+        is_multimodal = case_type == "multimodal"
 
         imaging = context.get("imaging", {}) or {}
         imaging_findings = imaging.get("findings", {})
@@ -148,6 +153,22 @@ class OpenAiClient(SingletonMixin):
         warning = ocr_data.get("extraction_warning")
         nlp_entities = context.get("nlp", {}).get("entities", {}) or {}
         diseases = nlp_entities.get("diseases", []) if isinstance(nlp_entities, dict) else []
+
+        if is_multimodal:
+            parts = ["AI-assisted unified clinical case summary:"]
+            fused = context.get("fused", {}) or {}
+            if lab_analysis.get("clinical_summary"):
+                parts.append(lab_analysis["clinical_summary"])
+            cards = (context.get("correlation") or {}).get("cards") or []
+            for card in cards[:2]:
+                parts.append(f"{card.get('label')}: {card.get('value')}.")
+            if diseases:
+                parts.append(f"Clinical entities: {', '.join(diseases)}.")
+            parts.append("Correlate lab and imaging with clinical presentation.")
+            parts.append("Physician review required before finalization.")
+            if grounded_chunks:
+                parts.append(f"Grounded on {len(grounded_chunks)} vector-retrieved sources.")
+            return " ".join(parts)
 
         if is_xray:
             parts = ["AI-assisted chest X-ray summary:"]

@@ -59,6 +59,45 @@ class ClinicalController(BaseController):
             )
         return ResponseBuilder.success(result)
 
+    async def upload_case(
+        self,
+        current_user: CurrentUser,
+        files: list[UploadFile],
+        file_types: list[str],
+        patient_external_id: str,
+        patient_name: str,
+        patient_age: str | None = None,
+        patient_gender: str | None = None,
+    ) -> JSONResponse:
+        """Upload multiple documents into one unified clinical case."""
+        if not files:
+            raise ValidationException("At least one file is required.")
+        if len(files) != len(file_types):
+            raise ValidationException("Each file must have a matching document type.")
+
+        documents = []
+        for upload, doc_type in zip(files, file_types, strict=True):
+            content = await upload.read()
+            documents.append(
+                {
+                    "file_stream": io.BytesIO(content),
+                    "file_name": upload.filename or "upload.bin",
+                    "mime_type": upload.content_type or "application/octet-stream",
+                    "file_type": normalize_file_type(doc_type),
+                }
+            )
+
+        with get_database_manager().session_scope() as session:
+            result = IngestionService(session).upload_case(
+                user_id=current_user.user_id,
+                patient_external_id=patient_external_id,
+                patient_name=patient_name,
+                documents=documents,
+                patient_age=patient_age,
+                patient_gender=patient_gender,
+            )
+        return ResponseBuilder.success(result)
+
     def search_patients(self, query: str, limit: int = 10) -> JSONResponse:
         """Semantic + keyword patient search."""
         with get_database_manager().session_scope() as session:

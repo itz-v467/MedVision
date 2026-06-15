@@ -8,6 +8,25 @@ export class ClinicalService {
     });
   }
 
+  static uploadCase(formData) {
+    return HttpClient.request("/api/clinical/cases", {
+      method: "POST",
+      body: formData,
+    });
+  }
+
+  static uploadSingleLegacy(file, fileType, baseFormData) {
+    const formData = new FormData();
+    formData.append("file", file);
+    formData.append("file_type", fileType);
+    for (const [key, value] of baseFormData.entries()) {
+      if (key !== "files" && key !== "file_types") {
+        formData.append(key, value);
+      }
+    }
+    return ClinicalService.upload(formData);
+  }
+
   static listEncounters() {
     return HttpClient.request("/api/clinical/encounters");
   }

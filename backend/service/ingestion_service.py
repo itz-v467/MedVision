@@ -19,7 +19,9 @@ from backend.model.encounter_model import EncounterModel
 from backend.model.patient_model import PatientModel
 from backend.service.alert_engine_service import AlertEngineService
 from backend.service.audit_service import AuditService
+from backend.service.clinical_correlation_engine import ClinicalCorrelationEngine
 from backend.service.clinical_summary_service import ClinicalSummaryService
+from backend.service.encounter_fusion_service import EncounterFusionService
 from backend.service.explainability_service import ExplainabilityService
 from backend.service.imaging_ai_service import ImagingAiService
 from backend.service.longitudinal_analysis_service import LongitudinalAnalysisService
@@ -35,8 +37,11 @@ from backend.utils.pipeline_tracker import (
     summarize_pipeline_step,
 )
 from backend.service.patient_search_service import PatientSearchService
+from backend.utils.case_type import infer_case_type
 from backend.utils.imaging_summary import format_imaging_summary, imaging_attention_items
+from backend.utils.imaging_regions import compute_imaging_status, derive_anomaly_regions
 from backend.utils.patient_id_generator import resolve_patient_external_id
+from backend.utils.storage_paths import resolve_storage_file
 from backend.utils.upload_validation import (
     IMAGE_MIME_TYPES,
     normalize_file_type,
@@ -69,6 +74,8 @@ class IngestionService(BaseService):
         self._alerts = AlertEngineService(session)
         self._audit = AuditService(session)
         self._longitudinal = LongitudinalAnalysisService(session)
+        self._fusion = EncounterFusionService()
+        self._clinical_correlation = ClinicalCorrelationEngine()
 
     def upload_and_process(
         self,
@@ -82,22 +89,60 @@ class IngestionService(BaseService):
         patient_age: str | None = None,
         patient_gender: str | None = None,
     ) -> dict[str, Any]:
-        """Upload file and execute AI pipeline."""
-        file_type = normalize_file_type(file_type)
-        mime_type = validate_upload(file_name, mime_type, file_type)
-        validate_type_selection(file_name, mime_type, file_type)
-        file_type = resolve_document_type(file_name, mime_type, file_type)
-
-        file_stream.seek(0, 2)
-        size = file_stream.tell()
-        file_stream.seek(0)
-        if size > MAX_FILE_SIZE_BYTES:
-            raise ValidationException("File exceeds maximum allowed size.")
-
-        patient_external_id = resolve_patient_external_id(
-            self._session, patient_external_id
+        """Upload a single file (backward-compatible wrapper)."""
+        return self.upload_case(
+            user_id=user_id,
+            patient_external_id=patient_external_id,
+            patient_name=patient_name,
+            documents=[
+                {
+                    "file_stream": file_stream,
+                    "file_name": file_name,
+                    "mime_type": mime_type,
+                    "file_type": file_type,
+                }
+            ],
+            patient_age=patient_age,
+            patient_gender=patient_gender,
         )
 
+    def upload_case(
+        self,
+        user_id: uuid.UUID,
+        patient_external_id: str,
+        patient_name: str,
+        documents: list[dict[str, Any]],
+        patient_age: str | None = None,
+        patient_gender: str | None = None,
+    ) -> dict[str, Any]:
+        """Upload one or more documents into a single encounter and run unified AI pipeline."""
+        if not documents:
+            raise ValidationException("At least one clinical document is required.")
+
+        validated_docs: list[dict[str, Any]] = []
+        for doc in documents:
+            file_type = normalize_file_type(str(doc.get("file_type", "")))
+            file_name = doc.get("file_name") or "upload.bin"
+            mime_type = validate_upload(file_name, doc.get("mime_type") or "", file_type)
+            validate_type_selection(file_name, mime_type, file_type)
+            file_type = resolve_document_type(file_name, mime_type, file_type)
+            stream: BinaryIO = doc["file_stream"]
+            stream.seek(0, 2)
+            size = stream.tell()
+            stream.seek(0)
+            if size > MAX_FILE_SIZE_BYTES:
+                raise ValidationException(f"File {file_name} exceeds maximum allowed size.")
+            validated_docs.append(
+                {
+                    "file_stream": stream,
+                    "file_name": file_name,
+                    "mime_type": mime_type,
+                    "file_type": file_type,
+                }
+            )
+
+        case_type = infer_case_type(d["file_type"] for d in validated_docs)
+        patient_external_id = resolve_patient_external_id(self._session, patient_external_id)
         patient = (
             self._session.query(PatientModel)
             .filter(PatientModel.external_id == patient_external_id)
@@ -121,92 +166,117 @@ class IngestionService(BaseService):
                 patient.gender = patient_gender
 
         PatientSearchService(self._session).index_patient(patient)
-
         if not patient_name or not patient_name.strip():
             raise ValidationException("Please enter the patient's full name.")
 
         pipeline_info(
             "upload",
-            "Starting clinical upload",
+            "Starting clinical case upload",
             patient=patient_name,
-            file_type=file_type,
-            file_name=file_name,
+            case_type=case_type,
+            document_count=len(validated_docs),
         )
 
         encounter = EncounterModel(
             patient_id=patient.id,
             assigned_user_id=user_id,
             status=AiProcessingStatus.PROCESSING.value,
+            case_type=case_type,
         )
         self._encounter_dao.create(encounter)
-
-        storage_path = self._storage.save_file(file_stream, file_name)
-        if mime_type in IMAGE_MIME_TYPES:
-            validate_image_content(storage_path, file_type)
-        document = DocumentModel(
-            encounter_id=encounter.id,
-            file_name=file_name,
-            mime_type=mime_type,
-            storage_path=storage_path,
-            file_type=file_type,
-            status=AiProcessingStatus.PROCESSING.value,
-        )
-        self._document_dao.create_document(document)
-        self._audit.log_action(user_id, "FILE_UPLOAD", "document", str(document.id))
-
         tracker = PipelineTracker()
+
+        document_results: list[dict[str, Any]] = []
+        name_validation: dict[str, Any] = {}
+        xray_doc = None
 
         ocr_label, ocr_detail = plain_step_label("ocr")
         with tracker.run_step("ocr", ocr_label, ocr_detail) as ocr_record:
-            ocr_result = self._ocr.process_document(document.id)
-            pipeline_debug(
-                "ocr",
-                "OCR finished",
-                confidence=ocr_result.get("confidence"),
-                chars=len(ocr_result.get("raw_text", "")),
-                biomarkers=len(
-                    ocr_result.get("structured_data", {}).get("biomarkers", [])
-                ),
-            )
-            demographics = ocr_result.get("structured_data", {}).get(
-                "patient_demographics", {}
-            )
-            extracted_name = demographics.get("full_name", "")
-            name_validation = compare_patient_names(patient_name, extracted_name)
-            if not name_validation["matched"]:
-                pipeline_warning(
-                    "identity",
-                    "Name check warning — continuing processing",
-                    entered=patient_name,
-                    extracted=extracted_name,
+            total_biomarkers = 0
+            for doc in validated_docs:
+                storage_path = self._storage.save_file(doc["file_stream"], doc["file_name"])
+                if doc["mime_type"] in IMAGE_MIME_TYPES:
+                    validate_image_content(storage_path, doc["file_type"])
+                document = DocumentModel(
+                    encounter_id=encounter.id,
+                    file_name=doc["file_name"],
+                    mime_type=doc["mime_type"],
+                    storage_path=storage_path,
+                    file_type=doc["file_type"],
+                    status=AiProcessingStatus.PROCESSING.value,
                 )
+                self._document_dao.create_document(document)
+                self._audit.log_action(user_id, "FILE_UPLOAD", "document", str(document.id))
 
-            structured = dict(ocr_result.get("structured_data", {}))
-            structured["name_validation"] = name_validation
-            ocr_result["structured_data"] = structured
-            self._persist_ocr_structured_data(document.id, structured)
-            ocr_record["summary"] = summarize_pipeline_step("ocr", ocr_result, file_type)
+                ocr_result = self._ocr.process_document(document.id)
+                structured = dict(ocr_result.get("structured_data", {}))
+                demographics = structured.get("patient_demographics", {})
+                extracted_name = demographics.get("full_name", "")
+                doc_name_validation = compare_patient_names(patient_name, extracted_name)
+                structured["name_validation"] = doc_name_validation
+                ocr_result["structured_data"] = structured
+                self._persist_ocr_structured_data(document.id, structured)
 
-        nlp_text = ocr_result.get("raw_text") or ""
-        nlp_label, nlp_detail = plain_step_label("nlp")
-        with tracker.run_step("nlp", nlp_label, nlp_detail) as nlp_record:
-            nlp_result = self._nlp.process_encounter(encounter.id, nlp_text)
-            nlp_record["summary"] = summarize_pipeline_step("nlp", nlp_result, file_type)
+                if not name_validation:
+                    name_validation = doc_name_validation
+                total_biomarkers += len(structured.get("biomarkers", []))
+                document_results.append({"document": document, "ocr": ocr_result})
+                if doc["file_type"] == "xray":
+                    xray_doc = document
 
+            ocr_record["summary"] = (
+                f"{len(document_results)} document(s) · {total_biomarkers} lab value(s) extracted"
+            )
+
+        imaging_result: dict[str, Any] = {"skipped": True, "findings": {}, "confidence": 0.0}
         img_label, img_detail = plain_step_label("imaging")
         with tracker.run_step("imaging", img_label, img_detail) as imaging_record:
-            imaging_result = self._imaging.analyze_study(
-                encounter.id, storage_path, mime_type, file_type
-            )
+            if xray_doc is not None:
+                imaging_result = self._imaging.analyze_study(
+                    encounter.id,
+                    xray_doc.storage_path,
+                    xray_doc.mime_type,
+                    "xray",
+                    source_document_id=xray_doc.id,
+                )
             if imaging_result.get("skipped"):
                 imaging_record["status"] = "skipped"
             imaging_record["summary"] = summarize_pipeline_step(
-                "imaging", imaging_result, file_type
+                "imaging", imaging_result, case_type
             )
 
-        if file_type == "xray":
+        fused = self._fusion.fuse(
+            document_results=document_results,
+            imaging_result=imaging_result,
+            case_type=case_type,
+        )
+        merged_text = fused.get("merged_text") or ""
+
+        nlp_label, nlp_detail = plain_step_label("nlp")
+        with tracker.run_step("nlp", nlp_label, nlp_detail) as nlp_record:
+            nlp_result = self._nlp.process_encounter(encounter.id, merged_text)
+            nlp_record["summary"] = summarize_pipeline_step("nlp", nlp_result, case_type)
+
+        fused["nlp_confidence"] = nlp_result.get("confidence", 0)
+
+        corr_label, corr_detail = plain_step_label("correlation")
+        with tracker.run_step("correlation", corr_label, corr_detail) as correlation_record:
+            correlation = self._clinical_correlation.correlate(fused)
+            correlation_record["summary"] = summarize_pipeline_step(
+                "correlation", correlation, case_type
+            )
+
+        primary_doc = document_results[0]["document"]
+        primary_ocr = document_results[0]["ocr"]
+        structured = dict(fused.get("structured_data", {}))
+        structured["name_validation"] = name_validation
+        structured["correlation"] = correlation
+        structured["case_type"] = case_type
+        primary_ocr["structured_data"] = structured
+        self._persist_ocr_structured_data(primary_doc.id, structured)
+
+        if case_type == "single_xray" and not imaging_result.get("skipped"):
             imaging_summary = format_imaging_summary(imaging_result)
-            structured = dict(ocr_result.get("structured_data", {}))
             lab_analysis = dict(structured.get("lab_analysis", {}))
             lab_analysis["clinical_summary"] = imaging_summary
             lab_analysis["precautions"] = [
@@ -222,24 +292,8 @@ class IngestionService(BaseService):
             ]
             structured["lab_analysis"] = lab_analysis
             structured["imaging_summary"] = imaging_summary
-            ocr_result["structured_data"] = structured
-            self._persist_ocr_structured_data(document.id, structured)
-
-        corr_label, corr_detail = plain_step_label("correlation")
-        with tracker.run_step("correlation", corr_label, corr_detail) as correlation_record:
-            correlation = self._correlation.correlate(
-                encounter.id,
-                {
-                    "imaging_confidence": imaging_result["confidence"],
-                    "ocr_confidence": ocr_result["confidence"],
-                    "nlp_confidence": nlp_result["confidence"],
-                    "imaging_skipped": imaging_result.get("skipped", False),
-                    "file_type": file_type,
-                },
-            )
-            correlation_record["summary"] = summarize_pipeline_step(
-                "correlation", correlation, file_type
-            )
+            primary_ocr["structured_data"] = structured
+            self._persist_ocr_structured_data(primary_doc.id, structured)
 
         explanation = self._explainability.build_explanation(
             encounter.id,
@@ -256,16 +310,17 @@ class IngestionService(BaseService):
             summary = self._summary.generate_summary(
                 encounter.id,
                 {
-                    "file_type": file_type,
-                    "ocr": ocr_result,
+                    "file_type": fused.get("file_type", case_type),
+                    "case_type": case_type,
+                    "document_manifest": fused.get("document_manifest", []),
+                    "ocr": primary_ocr,
                     "nlp": nlp_result,
                     "imaging": imaging_result,
                     "correlation": correlation,
+                    "fused": fused,
                 },
             )
-            summary_record["summary"] = summarize_pipeline_step(
-                "summary", summary, file_type
-            )
+            summary_record["summary"] = summarize_pipeline_step("summary", summary, case_type)
             evidence = summary.get("evidence_sources", {})
             rag_chunks = evidence.get("rag_chunks") if isinstance(evidence, dict) else []
             if isinstance(rag_chunks, list) and rag_chunks:
@@ -278,40 +333,57 @@ class IngestionService(BaseService):
         alert_label, alert_detail = plain_step_label("alerts")
         with tracker.run_step("alerts", alert_label, alert_detail) as alerts_record:
             alerts = self._alerts.evaluate_findings(encounter.id, findings)
-            alerts_record["summary"] = summarize_pipeline_step("alerts", alerts, file_type)
+            alerts.extend(
+                self._alerts.evaluate_lab_abnormalities(
+                    encounter.id, fused.get("biomarkers", [])
+                )
+            )
+            alerts_record["summary"] = summarize_pipeline_step("alerts", alerts, case_type)
 
         pipeline_run = tracker.as_dict()
         structured["pipeline_run"] = pipeline_run
-        self._persist_ocr_structured_data(document.id, structured)
+        self._persist_ocr_structured_data(primary_doc.id, structured)
 
         encounter.status = AiProcessingStatus.REVIEW_REQUIRED.value
         self._encounter_dao.update(encounter)
-        logger.info("Workflow completed | encounter=%s", encounter.id)
+        logger.info("Workflow completed | encounter=%s case_type=%s", encounter.id, case_type)
 
         lab_analysis = structured.get("lab_analysis", {})
         return {
             "encounter_id": str(encounter.id),
-            "document_id": str(document.id),
+            "document_id": str(primary_doc.id),
+            "document_ids": [str(item["document"].id) for item in document_results],
             "patient_external_id": patient.external_id,
             "patient_id": str(patient.id),
+            "case_type": case_type,
             "name_validation": name_validation,
             "pipeline": pipeline_run,
             "results_overview": self._build_results_overview(
-                file_type=file_type,
-                ocr_result=ocr_result,
+                file_type=fused.get("file_type", case_type),
+                case_type=case_type,
+                ocr_result=primary_ocr,
                 lab_analysis=lab_analysis,
                 summary=summary,
                 alerts=alerts,
                 name_validation=name_validation,
                 imaging_result=imaging_result,
+                correlation=correlation,
             ),
-            "ocr": ocr_result,
+            "ocr": primary_ocr,
             "nlp": nlp_result,
             "imaging": imaging_result,
             "correlation": correlation,
             "explainability": explanation,
             "summary": summary,
             "alerts": alerts,
+            "documents": [
+                {
+                    "id": str(item["document"].id),
+                    "file_name": item["document"].file_name,
+                    "file_type": item["document"].file_type,
+                }
+                for item in document_results
+            ],
             "message": Messages.AI_PROCESSING_COMPLETE.value,
         }
 
@@ -378,7 +450,7 @@ class IngestionService(BaseService):
             .first()
         )
         summary = self._document_dao.find_summary_by_encounter(encounter_id)
-        ocr = self._document_dao.find_ocr_by_encounter(encounter_id)
+        ocr = self._resolve_fused_ocr(encounter_id)
         nlp = self._document_dao.find_nlp_by_encounter(encounter_id)
         study, inference = self._document_dao.find_imaging_by_encounter(encounter_id)
         alerts = self._document_dao.find_alerts_by_encounter(encounter_id)
@@ -390,16 +462,25 @@ class IngestionService(BaseService):
         name_validation = structured.get("name_validation")
         pipeline_run = structured.get("pipeline_run")
         lab_analysis = structured.get("lab_analysis", {})
+        correlation = structured.get("correlation", {})
+        case_type = encounter.case_type or structured.get("case_type") or infer_case_type(
+            doc.file_type for doc in documents
+        )
+        file_type = case_type if case_type == "multimodal" else (
+            documents[0].file_type if documents else "clinical_note"
+        )
         results_overview = None
         if structured:
             results_overview = self._build_results_overview(
-                file_type=documents[0].file_type if documents else "clinical_note",
+                file_type=file_type,
+                case_type=case_type,
                 ocr_result={"structured_data": structured},
                 lab_analysis=lab_analysis,
                 summary=self._serialize_summary(summary) or {},
                 alerts=alerts,
                 name_validation=name_validation or {},
                 imaging_result=imaging,
+                correlation=correlation,
             )
 
         return {
@@ -408,6 +489,7 @@ class IngestionService(BaseService):
                 "patient_id": str(encounter.patient_id),
                 "status": encounter.status,
                 "chief_complaint": encounter.chief_complaint,
+                "case_type": case_type,
                 "created_at": encounter.created_at.isoformat(),
             },
             "patient": {
@@ -430,6 +512,8 @@ class IngestionService(BaseService):
             "ocr": ocr_payload,
             "nlp": self._serialize_nlp(nlp),
             "imaging": imaging,
+            "correlation": correlation,
+            "document_manifest": structured.get("document_manifest", []),
             "summary": self._serialize_summary(summary),
             "name_validation": name_validation,
             "pipeline": pipeline_run,
@@ -490,29 +574,18 @@ class IngestionService(BaseService):
         if not documents:
             raise NotFoundException("No document found for this encounter.")
 
-        document = documents[0]
+        document = next(
+            (doc for doc in documents if doc.file_type == "xray"),
+            next((doc for doc in documents if doc.mime_type in IMAGE_MIME_TYPES), documents[0]),
+        )
         if document.mime_type not in IMAGE_MIME_TYPES:
             raise NotFoundException("Source file is not an image.")
 
-        return str(self._validate_storage_file(document.storage_path)), document.mime_type
+        return str(resolve_storage_file(document.storage_path)), document.mime_type
 
     def _validate_storage_file(self, file_path: str):
         """Ensure a file path is inside the configured storage root."""
-        from pathlib import Path
-
-        from backend.config import get_settings
-
-        path = Path(file_path).resolve()
-        storage_root = Path(get_settings().storage_path).resolve()
-        try:
-            path.relative_to(storage_root)
-        except ValueError as exc:
-            raise NotFoundException("File path is invalid.") from exc
-
-        if not path.is_file():
-            raise NotFoundException("File not found on server.")
-
-        return path
+        return resolve_storage_file(file_path)
 
     def get_patient_timeline(self, patient_id: uuid.UUID) -> dict[str, Any]:
         """Return longitudinal timeline for a patient."""
@@ -569,13 +642,17 @@ class IngestionService(BaseService):
         alerts: list[Any],
         name_validation: dict[str, Any],
         imaging_result: dict[str, Any] | None = None,
+        case_type: str | None = None,
+        correlation: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Structured high-level results for the review UI."""
         biomarkers = ocr_result.get("structured_data", {}).get("biomarkers", [])
         abnormal = lab_analysis.get("abnormal_count", 0)
         normal = lab_analysis.get("normal_count", 0)
+        resolved_case_type = case_type or file_type
         return {
             "document_type": file_type,
+            "case_type": resolved_case_type,
             "identity_verified": name_validation.get("matched", False),
             "extracted_patient_name": name_validation.get("extracted_name", ""),
             "entered_patient_name": name_validation.get("entered_name", ""),
@@ -585,8 +662,15 @@ class IngestionService(BaseService):
             "panel_coverage_pct": lab_analysis.get("panel_coverage_pct"),
             "summary_status": summary.get("status"),
             "alert_count": len(alerts) if isinstance(alerts, list) else 0,
+            "correlation_score": (correlation or {}).get("weighted_evidence_score"),
             "headline": self._results_headline(
-                file_type, abnormal, normal, alerts, imaging_result
+                file_type,
+                abnormal,
+                normal,
+                alerts,
+                imaging_result,
+                case_type=resolved_case_type,
+                lab_analysis=lab_analysis,
             ),
         }
 
@@ -597,8 +681,16 @@ class IngestionService(BaseService):
         normal: int,
         alerts: list[Any],
         imaging_result: dict[str, Any] | None = None,
+        *,
+        case_type: str | None = None,
+        lab_analysis: dict[str, Any] | None = None,
     ) -> str:
         """One-line clinical headline for the results overview."""
+        if case_type == "multimodal":
+            custom = (lab_analysis or {}).get("clinical_summary", "")
+            if custom:
+                return custom.split(".")[0] + " — unified case review required"
+            return "Multimodal case: review lab and imaging findings together."
         if file_type == "lab_report":
             if abnormal > 0:
                 return f"{abnormal} test result(s) are outside the usual healthy range — please show your doctor."
@@ -611,6 +703,17 @@ class IngestionService(BaseService):
         if alert_count:
             return f"{alert_count} reminder(s) added — please review with your doctor."
         return "Analysis complete — your doctor should review this before any decisions."
+
+    def _resolve_fused_ocr(self, encounter_id: uuid.UUID) -> Any:
+        """Return OCR row carrying fused encounter structured data when present."""
+        rows = self._document_dao.find_all_ocr_by_encounter(encounter_id)
+        if not rows:
+            return None
+        for row in rows:
+            structured = row.structured_data or {}
+            if structured.get("document_manifest") or structured.get("correlation"):
+                return row
+        return rows[-1]
 
     def _serialize_ocr(self, ocr: Any) -> dict[str, Any] | None:
         """Serialize OCR ORM row."""
@@ -670,21 +773,32 @@ class IngestionService(BaseService):
                     regions = raw_regions
 
             if not regions and study.storage_path:
-                from backend.utils.imaging_regions import derive_anomaly_regions
-
                 try:
-                    image_path = str(self._validate_storage_file(study.storage_path))
+                    image_path = str(resolve_storage_file(study.storage_path))
                     regions = derive_anomaly_regions(
                         image_path, inference.findings if inference else {}
                     )
-                except Exception:
-                    regions = []
+                    if regions and isinstance(inference.bounding_boxes, dict):
+                        inference.bounding_boxes["regions"] = regions
+                        if isinstance(inference.bounding_boxes.get("analysis_proof"), dict):
+                            inference.bounding_boxes["analysis_proof"]["regions"] = regions
+                        self._document_dao.save_inference(inference)
+                except Exception as exc:
+                    logger.warning("Region re-derive failed: %s", exc)
+                    regions = derive_anomaly_regions(
+                        study.storage_path, inference.findings if inference else {}
+                    )
 
             txrv = get_xray_inference_client()
             engine = proof.get("engine") or (
                 "torchxrayvision"
                 if not str(inference.model_version).startswith("fallback")
                 else "fallback"
+            )
+            imaging_status = compute_imaging_status(
+                study=study,
+                inference=inference,
+                regions=regions,
             )
             payload.update(
                 {
@@ -695,12 +809,14 @@ class IngestionService(BaseService):
                     "confidence": inference.confidence_score,
                     "model_version": inference.model_version,
                     "regions": regions,
+                    "imaging_status": imaging_status,
                     "proof": {
                         "engine": engine,
                         "txrv_installed": txrv.is_available,
                         "model_version": inference.model_version,
                         "heatmap_available": heatmap_exists,
                         "study_status": study.status,
+                        "imaging_status": imaging_status,
                         "pathology_scores": proof.get("pathology_scores") or {},
                         "is_fallback": engine == "fallback"
                         or str(inference.model_version).startswith("fallback"),

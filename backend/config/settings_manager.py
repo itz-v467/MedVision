@@ -45,7 +45,10 @@ class SettingsManager(SingletonMixin):
         )
         self.imaging_device: str = os.getenv("IMAGING_DEVICE", "cpu")
         self.imaging_detection_threshold: float = float(
-            os.getenv("IMAGING_DETECTION_THRESHOLD", "0.5")
+            os.getenv("IMAGING_DETECTION_THRESHOLD", "0.65")
+        )
+        self.patient_search_vector_min: float = float(
+            os.getenv("PATIENT_SEARCH_VECTOR_MIN", "0.62")
         )
         self.openai_api_key: str = os.getenv("OPENAI_API_KEY", "")
         self.openai_llm_model: str = os.getenv("OPENAI_LLM_MODEL", "gpt-4o-mini")

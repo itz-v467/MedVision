@@ -51,6 +51,28 @@ async def upload(
     )
 
 
+@router.post("/cases")
+async def upload_case(
+    current_user: CurrentUser = Depends(_auth.require_roles(*_upload_roles)),
+    files: list[UploadFile] = File(...),
+    file_types: list[str] = Form(...),
+    patient_external_id: str = Form("AUTO"),
+    patient_name: str = Form("Unknown Patient"),
+    patient_age: str = Form(None),
+    patient_gender: str = Form(None),
+):
+    """Upload multiple documents as one unified clinical case."""
+    return await _controller.upload_case(
+        current_user,
+        files,
+        file_types,
+        patient_external_id,
+        patient_name,
+        patient_age,
+        patient_gender,
+    )
+
+
 @router.get("/patients/search")
 def search_patients(
     q: str = Query(""),

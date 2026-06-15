@@ -225,9 +225,38 @@ function sourceTypeLabel(sourceType) {
 }
 
 function buildDocumentSource(detail) {
-  const docType = detail?.documents?.[0]?.file_type || "";
+  const manifest = detail?.document_manifest?.length
+    ? detail.document_manifest
+    : (detail?.documents || []).map((doc) => ({
+        file_type: doc.file_type,
+        file_name: doc.file_name,
+      }));
+  const caseType = detail?.encounter?.case_type || detail?.correlation?.case_type || "";
+  const docType = manifest[0]?.file_type || detail?.documents?.[0]?.file_type || "";
   const ocrData = detail?.ocr?.structured_data;
   if (!ocrData || !Object.keys(ocrData).length) return null;
+
+  if (caseType === "multimodal" && manifest.length > 1) {
+    const cards = manifest.map((doc) => ({
+      label: DOC_TYPE_LABELS[doc.file_type] || doc.file_type,
+      value: doc.file_name || "Uploaded file",
+      note:
+        doc.file_type === "lab_report" && typeof doc.biomarker_count === "number"
+          ? `${doc.biomarker_count} lab value(s) extracted`
+          : doc.file_type === "xray"
+            ? "Chest imaging AI pipeline applied"
+            : "Text extracted for clinical terms",
+    }));
+    return {
+      id: "ocr",
+      title: "Documents reviewed",
+      summary: `${manifest.length} files in one unified case`,
+      detailTitle: "Per-document intake manifest",
+      intro:
+        "Each document was validated, stored, and processed with the appropriate pipeline before fusion.",
+      cards,
+    };
+  }
 
   const preview = ocrData.raw_text_preview || ocrData.raw_text || "";
   const biomarkers = ocrData.biomarkers || [];
@@ -375,6 +404,28 @@ function buildImagingSource(detail) {
   };
 }
 
+function buildCorrelationSource(detail) {
+  const correlation = detail?.correlation;
+  const cards = correlation?.cards;
+  if (!cards?.length) return null;
+
+  return {
+    id: "correlation",
+    title: "Cross-check & correlation",
+    summary: `${cards.length} lab↔imaging link${cards.length === 1 ? "" : "s"} for review`,
+    detailTitle: "Automated cross-modal correlation",
+    intro:
+      "These plain-language links connect laboratory signals with chest imaging findings. Physician confirmation is required.",
+    cards: cards.map((card) => ({
+      label: card.label,
+      value: card.value,
+      note: card.note,
+      tone: card.tone,
+    })),
+    highlights: cards.map((card) => `${card.label}: ${card.value}`),
+  };
+}
+
 function buildReferencesSource(detail) {
   const evidenceBundle = detail?.summary?.evidence_sources;
   if (!evidenceBundle || typeof evidenceBundle !== "object") return null;
@@ -425,7 +476,13 @@ function buildReferencesSource(detail) {
 
 /** Build clinical evidence steps for the review page. */
 export function buildEvidenceSources(detail) {
-  const builders = [buildDocumentSource, buildTermsSource, buildImagingSource, buildReferencesSource];
+  const builders = [
+    buildDocumentSource,
+    buildTermsSource,
+    buildImagingSource,
+    buildCorrelationSource,
+    buildReferencesSource,
+  ];
   const sources = builders.map((fn) => fn(detail)).filter(Boolean);
 
   return sources.map((source, idx) => ({

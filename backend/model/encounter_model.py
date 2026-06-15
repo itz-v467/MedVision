@@ -31,6 +31,7 @@ class EncounterModel(Base):
         String(50), default=AiProcessingStatus.PENDING.value, index=True
     )
     chief_complaint: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    case_type: Mapped[str | None] = mapped_column(String(50), nullable=True, index=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(UTC)
     )

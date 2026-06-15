@@ -60,6 +60,24 @@ Default admin (after seed):
 docker compose up --build
 ```
 
+The backend Docker image installs `requirements-ml.txt` so TorchXRayVision runs in containers. For local dev without ML deps, the imaging client uses a deterministic fallback scorer.
+
+### Unified clinical cases
+
+Upload lab report + chest X-ray in one intake session:
+
+- **UI**: Patient intake → add documents per slot → one physician review page
+- **API**: `POST /api/clinical/cases` with multipart `files[]` and `file_types[]`
+- **Review**: unified summary, lab table, X-ray viewer with anomaly box, correlation cards
+
+### Backfill X-ray anomaly regions (existing encounters)
+
+```powershell
+$env:PYTHONPATH = "."
+python scripts\backfill_imaging_regions.py
+python scripts\backfill_imaging_regions.py --dry-run
+```
+
 - API: http://localhost:5000 (OpenAPI docs: http://localhost:5000/docs)
 - UI: http://localhost:8080
 
@@ -71,7 +89,9 @@ docker compose up --build
 | `POST /auth/refresh` | Refresh access token |
 | `GET /api/stats/dashboard` | Live dashboard metrics |
 | `GET /api/stats/charts` | Chart.js datasets |
-| `POST /api/clinical/upload` | Full AI workflow |
+| `POST /api/clinical/upload` | Single-file AI workflow (backward compatible) |
+| `POST /api/clinical/cases` | **Unified case** — multiple documents (lab + X-ray + note) → one encounter |
+| `GET /api/clinical/encounters/{id}` | Full review payload (`case_type`, `correlation`, `imaging.regions`) |
 
 ## Data layer (PostgreSQL + vectors)
 

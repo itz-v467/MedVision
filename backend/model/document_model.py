@@ -87,6 +87,9 @@ class ImagingStudyModel(Base):
     )
     modality: Mapped[str] = mapped_column(String(50), default="CR")
     storage_path: Mapped[str] = mapped_column(String(500))
+    source_document_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("documents.id"), nullable=True, index=True
+    )
     status: Mapped[str] = mapped_column(
         String(50), default=AiProcessingStatus.PENDING.value
     )

@@ -6,7 +6,7 @@ import { UI_LABELS } from "../../utils/plainLanguage";
 
 const STEPS = [
   { id: 1, label: "Patient" },
-  { id: 2, label: "Document" },
+  { id: 2, label: "Documents" },
   { id: 3, label: "Processing" },
   { id: 4, label: "Ready" },
 ];
@@ -116,10 +116,117 @@ export function IntakePatientStep({
       <div className="cv-intake-nav">
         <span />
         <button type="button" className="cv-btn cv-btn-primary" onClick={onNext}>
-          Continue to document →
+          Continue to documents →
         </button>
       </div>
     </div>
+  );
+}
+
+const DOCUMENT_SLOTS = [
+  { id: "lab_report", label: "Lab report", hint: "PDF, CSV, or photo of results" },
+  { id: "xray", label: "Chest X-ray", hint: "PNG or JPG radiograph" },
+  { id: "clinical_note", label: "Clinical note", hint: "TXT progress note (optional)" },
+];
+
+export function IntakeCaseDocumentStep({
+  slotFiles,
+  onSlotFile,
+  inputRefs,
+  onBack,
+  onSubmit,
+  loading,
+  error,
+  patientLabel,
+}) {
+  const filled = DOCUMENT_SLOTS.filter((slot) => slotFiles[slot.id]);
+  const manifest = filled.map((slot) => slot.label).join(" + ");
+
+  return (
+    <form className="cv-intake-card" onSubmit={onSubmit}>
+      <div className="cv-form-section">
+        <h3>Build a unified case</h3>
+        <p>
+          Add one or more documents for the same patient. Lab + chest X-ray together produce a
+          unified physician report.
+          {patientLabel && (
+            <> Patient: <strong>{patientLabel}</strong></>
+          )}
+        </p>
+
+        <div className="cv-intake-slots">
+          {DOCUMENT_SLOTS.map((slot) => {
+            const file = slotFiles[slot.id];
+            return (
+              <div key={slot.id} className="cv-intake-slot">
+                <div className="cv-intake-slot-head">
+                  <strong>{slot.label}</strong>
+                  <span className="cv-intake-slot-hint">{slot.hint}</span>
+                </div>
+                <div
+                  className={`cv-dropzone cv-dropzone-compact${file ? " has-file" : ""}`}
+                  onClick={() => inputRefs.current[slot.id]?.click()}
+                  onDrop={(e) => {
+                    e.preventDefault();
+                    onSlotFile(slot.id, e.dataTransfer.files?.[0] || null);
+                  }}
+                  onDragOver={(e) => e.preventDefault()}
+                  role="button"
+                  tabIndex={0}
+                  onKeyDown={(e) => e.key === "Enter" && inputRefs.current[slot.id]?.click()}
+                >
+                  <div className="cv-dropzone-title">
+                    {file ? file.name : `Add ${slot.label.toLowerCase()}`}
+                  </div>
+                  <div className="cv-dropzone-hint">
+                    {file ? `${(file.size / 1024).toFixed(1)} KB` : slot.hint}
+                  </div>
+                  <input
+                    ref={(el) => { inputRefs.current[slot.id] = el; }}
+                    type="file"
+                    accept={
+                      slot.id === "xray"
+                        ? ".png,.jpg,.jpeg"
+                        : slot.id === "clinical_note"
+                          ? ".txt"
+                          : ".pdf,.png,.jpg,.jpeg,.txt,.csv"
+                    }
+                    onChange={(e) => onSlotFile(slot.id, e.target.files?.[0] || null)}
+                    style={{ display: "none" }}
+                  />
+                </div>
+                {file && (
+                  <button
+                    type="button"
+                    className="cv-btn cv-btn-ghost cv-btn-sm"
+                    onClick={() => onSlotFile(slot.id, null)}
+                  >
+                    Remove
+                  </button>
+                )}
+              </div>
+            );
+          })}
+        </div>
+
+        {filled.length > 0 && (
+          <p className="cv-intake-manifest">
+            <strong>{filled.length} document{filled.length === 1 ? "" : "s"}:</strong> {manifest}
+          </p>
+        )}
+      </div>
+
+      {error && <div className="error-banner">{error}</div>}
+
+      <div className="cv-intake-nav">
+        <button type="button" className="cv-btn cv-btn-secondary" onClick={onBack}>
+          ← Back
+        </button>
+        <button type="submit" className="cv-btn cv-btn-primary" disabled={loading || !filled.length}>
+          {loading ? "Starting analysis…" : "Begin unified AI analysis"}
+        </button>
+      </div>
+    </form>
   );
 }
 

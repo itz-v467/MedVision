@@ -5,6 +5,11 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+from backend.logger import get_logger
+from backend.utils.storage_paths import resolve_storage_file_optional
+
+logger = get_logger()
+
 FINDING_LABELS = {
     "pneumothorax": "Pneumothorax",
     "opacity": "Lung opacity / pneumonia",
@@ -23,9 +28,9 @@ def _primary_finding_key(findings: dict[str, dict[str, Any]] | None) -> str | No
         reverse=True,
     )
     for key, data in ranked:
-        if data.get("detected") or (data.get("probability", 0) >= 0.35):
+        if data.get("detected"):
             return key
-    return ranked[0][0] if ranked else None
+    return None
 
 
 def _top_finding_label(findings: dict[str, dict[str, Any]] | None) -> str:
@@ -77,23 +82,36 @@ def derive_anomaly_regions(
     findings: dict[str, dict[str, Any]] | None = None,
 ) -> list[dict[str, Any]]:
     """Locate consolidation-style opacities inside the lung fields."""
-    path = Path(image_path)
-    if not path.is_file():
+    finding_key = _primary_finding_key(findings)
+    if not finding_key:
         return []
+
+    label = _top_finding_label(findings)
+
+    resolved = resolve_storage_file_optional(image_path)
+    if resolved is None:
+        path = Path(image_path)
+        if path.is_file():
+            resolved = path.resolve()
+        else:
+            logger.warning("derive_anomaly_regions: file missing, using heuristic | %s", image_path)
+            return _heuristic_region_for_finding(findings, 512, 512, label, finding_key)
 
     try:
         from PIL import Image
         import numpy as np
-    except ImportError:
-        return []
+    except ImportError as exc:
+        logger.warning("derive_anomaly_regions: numpy/PIL unavailable: %s", exc)
+        return _heuristic_region_for_finding(findings, 512, 512, label, finding_key)
 
     try:
-        arr = np.asarray(Image.open(path).convert("L"), dtype=np.float32)
-    except Exception:
-        return []
+        arr = np.asarray(Image.open(resolved).convert("L"), dtype=np.float32)
+    except Exception as exc:
+        logger.warning("derive_anomaly_regions: image open failed: %s", exc)
+        return _heuristic_region_for_finding(findings, 512, 512, label, finding_key)
 
     if arr.size == 0:
-        return []
+        return _heuristic_region_for_finding(findings, 512, 512, label, finding_key)
 
     arr = arr - arr.min()
     if arr.max() > 0:
@@ -117,7 +135,6 @@ def derive_anomaly_regions(
         threshold = max(lung_median + 0.035, float(np.percentile(lung, 82)))
         lung_mask = (lung >= threshold) & (lung < bone_cutoff)
 
-    # Drop edge noise from shoulders and collarbones.
     edge = max(int(min(lung.shape) * 0.08), 4)
     lung_mask[:edge, :] = False
     lung_mask[-edge:, :] = False
@@ -131,10 +148,8 @@ def derive_anomaly_regions(
     ] = lung_mask
 
     ys, xs = np.where(global_mask)
-    label = _top_finding_label(findings)
-    finding_key = _primary_finding_key(findings)
-
     if xs.size < 25:
+        logger.info("derive_anomaly_regions: pixel cluster small, using heuristic")
         return _heuristic_region_for_finding(findings, width, height, label, finding_key)
 
     x0, x1 = np.percentile(xs, [3, 97])
@@ -171,3 +186,23 @@ def _heuristic_region_for_finding(
             finding_key=finding_key,
         )
     ]
+
+
+def compute_imaging_status(
+    *,
+    study: Any | None,
+    inference: Any | None,
+    regions: list[dict[str, Any]],
+    imaging_skipped: bool = False,
+) -> str:
+    """Return viewer diagnostic status for the review UI."""
+    if imaging_skipped or study is None:
+        return "skipped"
+    if inference is None:
+        return "no_inference"
+    if not regions:
+        return "no_regions"
+    region = regions[0]
+    if (region.get("width") or 0) <= 0 or (region.get("height") or 0) <= 0:
+        return "no_regions"
+    return "ready"

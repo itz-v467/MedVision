@@ -1,14 +1,20 @@
 import { useEffect, useRef, useState } from "react";
 import { clinicalApi } from "../api/clinicalApi";
 import {
-  IntakeDocumentStep,
+  IntakeCaseDocumentStep,
   IntakePatientStep,
   IntakeProcessingStep,
   IntakeReadyStep,
   IntakeStepIndicator,
 } from "../components/intake/IntakeWizard";
 import { UI_LABELS } from "../utils/plainLanguage";
-import { suggestFileType, validateImageContent, validateUpload } from "../utils/uploadValidation";
+import { validateImageContent, validateUpload } from "../utils/uploadValidation";
+
+const EMPTY_SLOTS = {
+  lab_report: null,
+  xray: null,
+  clinical_note: null,
+};
 
 function validatePatientForm({ patientName, patientAge }) {
   const name = patientName.trim();
@@ -26,9 +32,7 @@ function validatePatientForm({ patientName, patientAge }) {
 
 export function UploadPage() {
   const [step, setStep] = useState(1);
-  const [file, setFile] = useState(null);
-  const [fileType, setFileType] = useState("");
-  const [fileTypeLocked, setFileTypeLocked] = useState(false);
+  const [slotFiles, setSlotFiles] = useState(EMPTY_SLOTS);
   const [patientName, setPatientName] = useState("");
   const [patientId, setPatientId] = useState("");
   const [previewId, setPreviewId] = useState("");
@@ -40,7 +44,7 @@ export function UploadPage() {
   const [encounterId, setEncounterId] = useState(null);
   const [pipeline, setPipeline] = useState(null);
   const [uploadResult, setUploadResult] = useState(null);
-  const inputRef = useRef();
+  const inputRefs = useRef({});
 
   useEffect(() => {
     clinicalApi.previewPatientId()
@@ -50,29 +54,9 @@ export function UploadPage() {
       .catch(() => {});
   }, [isExistingPatient]);
 
-  const applySelectedFile = (selected) => {
-    if (!selected) {
-      setFile(null);
-      return;
-    }
-    const suggested = suggestFileType(selected);
-    if (!fileTypeLocked && suggested) {
-      setFileType(suggested);
-    }
-    setFile(selected);
+  const handleSlotFile = (slotId, file) => {
+    setSlotFiles((prev) => ({ ...prev, [slotId]: file || null }));
     setError("");
-  };
-
-  const handleFileTypeChange = (nextType) => {
-    setFileType(nextType);
-    setFileTypeLocked(Boolean(nextType));
-    setError("");
-  };
-
-  const handleFileChange = (e) => applySelectedFile(e.target.files?.[0] || null);
-  const handleDrop = (e) => {
-    e.preventDefault();
-    applySelectedFile(e.dataTransfer.files?.[0] || null);
   };
 
   const handleSelectPatient = (patient) => {
@@ -104,36 +88,23 @@ export function UploadPage() {
 
   const handleUpload = async (event) => {
     event.preventDefault();
-    if (!file) {
-      setError("Please select a clinical file.");
-      return;
-    }
-    if (!fileType) {
-      setError("Please select a document type before uploading.");
+    const entries = Object.entries(slotFiles).filter(([, file]) => Boolean(file));
+    if (!entries.length) {
+      setError("Add at least one document (lab report, chest X-ray, or clinical note).");
       return;
     }
 
-    const validation = validateUpload(file, fileType);
-    if (!validation.ok) {
-      setError(validation.message);
-      if (!fileTypeLocked && validation.suggestedFileType) {
-        setFileType(validation.suggestedFileType);
+    for (const [slotId, file] of entries) {
+      const validation = validateUpload(file, slotId);
+      if (!validation.ok) {
+        setError(validation.message);
+        return;
       }
-      return;
-    }
-
-    const contentValidation = await validateImageContent(file, fileType);
-    if (!contentValidation.ok) {
-      setError(contentValidation.message);
-      return;
-    }
-
-    const suggested = suggestFileType(file);
-    if (fileTypeLocked && suggested && suggested !== fileType) {
-      setError(
-        `This file looks like a ${suggested === "xray" ? "chest X-ray" : suggested === "lab_report" ? "lab report" : "clinical note"}, but you selected a different document type. Please fix the selection or choose another file.`
-      );
-      return;
+      const contentValidation = await validateImageContent(file, slotId);
+      if (!contentValidation.ok) {
+        setError(contentValidation.message);
+        return;
+      }
     }
 
     setLoading(true);
@@ -144,24 +115,24 @@ export function UploadPage() {
     setUploadResult(null);
 
     const formData = new FormData();
-    formData.append("file", file);
+    entries.forEach(([, file]) => formData.append("files", file));
+    entries.forEach(([slotId]) => formData.append("file_types", slotId));
     formData.append(
       "patient_external_id",
       isExistingPatient && patientId ? patientId.trim() : "AUTO"
     );
     formData.append("patient_name", patientName.trim());
-    formData.append("file_type", fileType);
     if (patientAge) formData.append("patient_age", patientAge.trim());
     if (patientGender) formData.append("patient_gender", patientGender);
 
     try {
-      const data = await clinicalApi.upload(formData);
+      const data = entries.length === 1
+        ? await clinicalApi.uploadSingleLegacy(entries[0][1], entries[0][0], formData)
+        : await clinicalApi.uploadCase(formData);
       setPipeline(data.pipeline || null);
       setUploadResult(data);
       setEncounterId(data.encounter_id);
-      if (data.patient_external_id) {
-        setPatientId(data.patient_external_id);
-      }
+      if (data.patient_external_id) setPatientId(data.patient_external_id);
       setStep(4);
     } catch (err) {
       setError(err.message || "An error occurred during processing.");
@@ -175,7 +146,7 @@ export function UploadPage() {
   const resetForm = () => {
     setStep(1);
     setEncounterId(null);
-    setFile(null);
+    setSlotFiles(EMPTY_SLOTS);
     setPipeline(null);
     setUploadResult(null);
     setPatientName("");
@@ -184,8 +155,6 @@ export function UploadPage() {
     setIsExistingPatient(false);
     setPatientAge("");
     setPatientGender("");
-    setFileType("");
-    setFileTypeLocked(false);
     setError("");
     clinicalApi.previewPatientId()
       .then((data) => setPreviewId(data.patient_external_id || ""))
@@ -198,7 +167,7 @@ export function UploadPage() {
     <div className="cv-intake">
       <header className="cv-intake-header">
         <h1>{UI_LABELS.uploadTitle}</h1>
-        <p>Confirm patient identity, upload documents, and review the generated summary.</p>
+        <p>Upload lab reports, chest X-rays, and notes in one case for a unified doctor report.</p>
       </header>
 
       <IntakeStepIndicator currentStep={currentStep} />
@@ -222,13 +191,10 @@ export function UploadPage() {
       )}
 
       {step === 2 && !loading && !encounterId && (
-        <IntakeDocumentStep
-          file={file}
-          fileType={fileType}
-          setFileType={handleFileTypeChange}
-          inputRef={inputRef}
-          onFileChange={handleFileChange}
-          onDrop={handleDrop}
+        <IntakeCaseDocumentStep
+          slotFiles={slotFiles}
+          onSlotFile={handleSlotFile}
+          inputRefs={inputRefs}
           onBack={() => { setStep(1); setError(""); }}
           onSubmit={handleUpload}
           loading={loading}

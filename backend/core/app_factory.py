@@ -52,6 +52,7 @@ class AppFactory:
         ErrorHandlerRegistry(self._app)
         RouteRegistry().register_all(self._app)
         self._register_health()
+        self._run_migrations()
         self._ensure_database()
         return self._app
 
@@ -74,6 +75,69 @@ class AppFactory:
         def imaging_health():
             """Chest X-ray AI stack availability check."""
             return health_api.imaging_status()
+
+    def _run_migrations(self) -> None:
+        """Apply schema updates for existing PostgreSQL databases."""
+        if not get_settings().database_url.startswith("postgresql"):
+            return
+
+        from sqlalchemy import inspect, text
+
+        engine = get_database_manager().engine
+        inspector = inspect(engine)
+        if "encounters" not in inspector.get_table_names():
+            return
+
+        encounter_cols = {col["name"] for col in inspector.get_columns("encounters")}
+        imaging_cols = {col["name"] for col in inspector.get_columns("imaging_studies")}
+
+        statements: list[str] = []
+        if "case_type" not in encounter_cols:
+            statements.extend(
+                [
+                    "ALTER TABLE encounters ADD COLUMN IF NOT EXISTS case_type VARCHAR(50)",
+                    "CREATE INDEX IF NOT EXISTS ix_encounters_case_type ON encounters (case_type)",
+                ]
+            )
+        if "source_document_id" not in imaging_cols:
+            statements.extend(
+                [
+                    "ALTER TABLE imaging_studies "
+                    "ADD COLUMN IF NOT EXISTS source_document_id UUID",
+                    "CREATE INDEX IF NOT EXISTS ix_imaging_studies_source_document_id "
+                    "ON imaging_studies (source_document_id)",
+                    """
+                    DO $$
+                    BEGIN
+                        ALTER TABLE imaging_studies
+                        ADD CONSTRAINT fk_imaging_studies_source_document_id
+                        FOREIGN KEY (source_document_id) REFERENCES documents(id);
+                    EXCEPTION
+                        WHEN duplicate_object THEN NULL;
+                    END $$;
+                    """,
+                ]
+            )
+
+        if not statements:
+            return
+
+        with engine.begin() as connection:
+            for statement in statements:
+                connection.execute(text(statement))
+        logger.info("Applied unified-case schema patch (%d statement(s))", len(statements))
+
+        try:
+            from pathlib import Path
+
+            from alembic import command
+            from alembic.config import Config
+
+            ini_path = Path(__file__).resolve().parents[1] / "migrations" / "alembic.ini"
+            alembic_cfg = Config(str(ini_path))
+            command.stamp(alembic_cfg, "003_unified_case_columns")
+        except Exception as exc:
+            logger.warning("Could not stamp Alembic revision: %s", exc)
 
     def _ensure_database(self) -> None:
         """Create tables for non-production environments."""

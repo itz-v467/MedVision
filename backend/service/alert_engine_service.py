@@ -57,6 +57,40 @@ class AlertEngineService(BaseService):
         logger.info("Alerts created | count=%s", len(alerts_created))
         return alerts_created
 
+    def evaluate_lab_abnormalities(
+        self,
+        encounter_id: uuid.UUID,
+        biomarkers: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        """Create alerts for abnormal lab values."""
+        alerts_created: list[dict[str, Any]] = []
+        for marker in biomarkers:
+            if not marker.get("is_abnormal") and str(marker.get("flag", "")).upper() in {
+                "",
+                "NORMAL",
+                "N",
+            }:
+                continue
+            name = marker.get("display_name") or marker.get("name") or "Lab test"
+            value = marker.get("display_value") or marker.get("value") or ""
+            alert = AlertModel(
+                encounter_id=encounter_id,
+                title=f"Abnormal lab: {name}",
+                message=f"{name} {value} is outside the usual reference range.",
+                priority=AlertPriority.MEDIUM.value,
+            )
+            self._session.add(alert)
+            self._session.flush()
+            alerts_created.append(
+                {
+                    "id": str(alert.id),
+                    "title": alert.title,
+                    "priority": alert.priority,
+                    "message": alert.message,
+                }
+            )
+        return alerts_created
+
     def acknowledge_alert(self, alert_id: uuid.UUID) -> AlertModel:
         """Mark an alert as acknowledged."""
         alert = self._document_dao.find_alert_by_id(alert_id)

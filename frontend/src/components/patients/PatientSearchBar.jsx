@@ -94,8 +94,11 @@ export function PatientSearchBar({
                 <span className="cv-patient-search-hit-name">{patient.full_name}</span>
                 <span className="cv-patient-search-hit-meta">
                   {[patient.gender, patient.age && `Age ${patient.age}`].filter(Boolean).join(" · ")}
-                  {patient.match_type === "vector" && (
+                  {patient.match_type === "vector" && patient.similarity >= 0.75 && (
                     <span className="cv-patient-search-badge">AI match</span>
+                  )}
+                  {patient.match_type === "keyword" && (
+                    <span className="cv-patient-search-badge is-keyword">Name match</span>
                   )}
                 </span>
               </button>

@@ -1,8 +1,9 @@
 FROM python:3.11-slim AS builder
 
 WORKDIR /build
-COPY backend/requirements.txt .
-RUN pip install --no-cache-dir --prefix=/install -r requirements.txt
+COPY backend/requirements.txt backend/requirements-ml.txt ./
+RUN pip install --no-cache-dir --prefix=/install -r requirements.txt \
+    && pip install --no-cache-dir --prefix=/install -r requirements-ml.txt
 
 FROM python:3.11-slim AS runtime
 

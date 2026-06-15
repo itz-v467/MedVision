@@ -145,6 +145,18 @@ class DocumentDao(BaseDao):
             .all()
         )
 
+    def find_all_ocr_by_encounter(
+        self, encounter_id: uuid.UUID
+    ) -> list[OcrResultModel]:
+        """Return all OCR results for documents in an encounter."""
+        return (
+            self._session.query(OcrResultModel)
+            .join(DocumentModel, OcrResultModel.document_id == DocumentModel.id)
+            .filter(DocumentModel.encounter_id == encounter_id)
+            .order_by(OcrResultModel.created_at.asc())
+            .all()
+        )
+
     def find_documents_by_encounter(
         self, encounter_id: uuid.UUID
     ) -> list[DocumentModel]:

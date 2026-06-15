@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import importlib.util
-import hashlib
 import os
 from typing import Any
 
@@ -136,7 +135,8 @@ class XrayInferenceClient(SingletonMixin):
         findings = self._map_findings(pathology_scores, threshold)
         confidence = max(finding["probability"] for finding in findings.values())
         heatmap_path = self._save_intensity_heatmap(image_path, img)
-        regions = derive_anomaly_regions(image_path, findings)
+        flagged = any(item.get("detected") for item in findings.values())
+        regions = derive_anomaly_regions(image_path, findings) if flagged else []
 
         return {
             "findings": findings,
@@ -151,15 +151,49 @@ class XrayInferenceClient(SingletonMixin):
     def _map_findings(
         self, pathology_scores: dict[str, float], threshold: float
     ) -> dict[str, dict[str, Any]]:
-        """Map TXRV labels to FRD finding keys."""
-        findings: dict[str, dict[str, Any]] = {}
+        """Map TXRV labels to FRD finding keys with conservative detection."""
+        mapped: dict[str, float] = {}
         for finding_key, labels in PATHOLOGY_MAP.items():
-            probability = max(pathology_scores.get(label, 0.0) for label in labels)
+            mapped[finding_key] = max(
+                pathology_scores.get(label, 0.0) for label in labels
+            )
+
+        top_score = max(mapped.values(), default=0.0)
+        findings: dict[str, dict[str, Any]] = {}
+        for finding_key, probability in mapped.items():
+            rounded = round(probability, 4)
+            detected = (
+                top_score >= threshold
+                and rounded >= threshold
+                and rounded >= top_score * 0.92
+            )
             findings[finding_key] = {
-                "probability": round(probability, 4),
-                "detected": probability >= threshold,
+                "probability": rounded,
+                "detected": detected,
             }
         return findings
+
+    def _fallback_prediction(self, image_path: str) -> dict[str, Any]:
+        """Neutral fallback when ML stack is unavailable — never invent pathology."""
+        findings = {
+            key: {"probability": 0.12, "detected": False}
+            for key in PATHOLOGY_MAP
+        }
+        heatmap_path = self._save_simple_heatmap(image_path)
+        regions: list[dict[str, Any]] = []
+        return {
+            "findings": findings,
+            "confidence": 0.12,
+            "model_version": "fallback-1.0.0",
+            "heatmap_path": heatmap_path,
+            "pathology_scores": {},
+            "engine": "fallback",
+            "regions": regions,
+            "fallback_notice": (
+                "TorchXRayVision is not active in this environment. "
+                "Scores are placeholders only — do not use for clinical decisions."
+            ),
+        }
 
     def _save_intensity_heatmap(self, image_path: str, normalized_img: Any) -> str:
         """Save a grayscale intensity overlay as explainability artifact."""
@@ -183,55 +217,6 @@ class XrayInferenceClient(SingletonMixin):
         except Exception as exc:
             logger.warning("Heatmap generation failed: %s", exc)
             return f"{image_path}.heatmap.png"
-
-    def _fallback_prediction(self, image_path: str) -> dict[str, Any]:
-        """Deterministic fallback when ML stack is unavailable."""
-        seed = self._stable_seed(image_path)
-        base = 0.15 + (seed % 50) / 100.0
-        findings = {
-            "pneumothorax": {
-                "probability": round(base * 0.4, 4),
-                "detected": False,
-            },
-            "opacity": {
-                "probability": round(min(base * 1.2, 0.95), 4),
-                "detected": base * 1.2 >= 0.5,
-            },
-            "pleural_effusion": {
-                "probability": round(base * 0.6, 4),
-                "detected": False,
-            },
-            "nodule": {
-                "probability": round(base * 0.5, 4),
-                "detected": False,
-            },
-            "cardiomegaly": {
-                "probability": round(base * 0.9, 4),
-                "detected": base * 0.9 >= 0.5,
-            },
-        }
-        confidence = max(item["probability"] for item in findings.values())
-        heatmap_path = self._save_simple_heatmap(image_path)
-        regions = derive_anomaly_regions(image_path, findings)
-        return {
-            "findings": findings,
-            "confidence": round(confidence, 4),
-            "model_version": "fallback-1.0.0",
-            "heatmap_path": heatmap_path,
-            "pathology_scores": {},
-            "engine": "fallback",
-            "regions": regions,
-        }
-
-    def _stable_seed(self, image_path: str) -> int:
-        """Derive deterministic seed from file bytes, not storage path."""
-        try:
-            with open(image_path, "rb") as handle:
-                digest = hashlib.sha256(handle.read()).hexdigest()
-            return int(digest[:8], 16) % 1000
-        except Exception:
-            # fallback to path-based seed only if file cannot be read
-            return sum(image_path.encode("utf-8")) % 1000
 
     def _save_simple_heatmap(self, image_path: str) -> str | None:
         """Build a grayscale intensity map without TorchXRayVision."""
