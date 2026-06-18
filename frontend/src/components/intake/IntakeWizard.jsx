@@ -1,12 +1,13 @@
 import { Link } from "react-router-dom";
 import { PatientIdBadge, PatientSearchBar } from "../patients/PatientSearchBar";
+import { SymptomChatPanel } from "./SymptomChatPanel";
 import { AppRoutes } from "../../enums/routes";
 import { suggestFileType, fileTypeLabel } from "../../utils/uploadValidation";
 import { UI_LABELS } from "../../utils/plainLanguage";
 
 const STEPS = [
   { id: 1, label: "Patient" },
-  { id: 2, label: "Documents" },
+  { id: 2, label: "Case inputs" },
   { id: 3, label: "Processing" },
   { id: 4, label: "Ready" },
 ];
@@ -126,13 +127,21 @@ export function IntakePatientStep({
 const DOCUMENT_SLOTS = [
   { id: "lab_report", label: "Lab report", hint: "PDF, CSV, or photo of results" },
   { id: "xray", label: "Chest X-ray", hint: "PNG or JPG radiograph" },
-  { id: "clinical_note", label: "Clinical note", hint: "TXT progress note (optional)" },
 ];
 
 export function IntakeCaseDocumentStep({
   slotFiles,
   onSlotFile,
   inputRefs,
+  symptomMessages,
+  onSymptomMessagesChange,
+  symptomAssessment,
+  onSymptomAssessmentChange,
+  assistantMode,
+  onAssistantModeChange,
+  patientName,
+  patientAge,
+  patientGender,
   onBack,
   onSubmit,
   loading,
@@ -140,78 +149,108 @@ export function IntakeCaseDocumentStep({
   patientLabel,
 }) {
   const filled = DOCUMENT_SLOTS.filter((slot) => slotFiles[slot.id]);
-  const manifest = filled.map((slot) => slot.label).join(" + ");
+  const symptomTurns = (symptomMessages || []).filter((m) => m.role === "patient").length;
+  const manifestParts = [
+    ...filled.map((slot) => slot.label),
+    ...(symptomTurns > 0 ? [`Symptom chat (${symptomTurns} message${symptomTurns === 1 ? "" : "s"})`] : []),
+  ];
+  const canSubmit = filled.length > 0 || symptomTurns > 0;
 
   return (
-    <form className="cv-intake-card" onSubmit={onSubmit}>
+    <form className="cv-intake-card cv-intake-card-wide" onSubmit={onSubmit}>
       <div className="cv-form-section">
-        <h3>Build a unified case</h3>
+        <h3>Build your clinical case</h3>
         <p>
-          Add one or more documents for the same patient. Lab + chest X-ray together produce a
-          unified physician report.
+          Add lab or imaging documents and/or describe symptoms with the assistant.
+          Together they produce a unified physician report.
           {patientLabel && (
             <> Patient: <strong>{patientLabel}</strong></>
           )}
         </p>
 
-        <div className="cv-intake-slots">
-          {DOCUMENT_SLOTS.map((slot) => {
-            const file = slotFiles[slot.id];
-            return (
-              <div key={slot.id} className="cv-intake-slot">
-                <div className="cv-intake-slot-head">
-                  <strong>{slot.label}</strong>
-                  <span className="cv-intake-slot-hint">{slot.hint}</span>
-                </div>
-                <div
-                  className={`cv-dropzone cv-dropzone-compact${file ? " has-file" : ""}`}
-                  onClick={() => inputRefs.current[slot.id]?.click()}
-                  onDrop={(e) => {
-                    e.preventDefault();
-                    onSlotFile(slot.id, e.dataTransfer.files?.[0] || null);
-                  }}
-                  onDragOver={(e) => e.preventDefault()}
-                  role="button"
-                  tabIndex={0}
-                  onKeyDown={(e) => e.key === "Enter" && inputRefs.current[slot.id]?.click()}
-                >
-                  <div className="cv-dropzone-title">
-                    {file ? file.name : `Add ${slot.label.toLowerCase()}`}
+        <div className="cv-intake-builder">
+          <section className="cv-intake-builder-panel" aria-label="Documents">
+            <div className="cv-intake-builder-panel-head">
+              <h4>Documents</h4>
+              <span className="cv-intake-builder-panel-hint">Lab report or chest X-ray</span>
+            </div>
+            <div className="cv-intake-slots">
+              {DOCUMENT_SLOTS.map((slot) => {
+                const file = slotFiles[slot.id];
+                return (
+                  <div key={slot.id} className="cv-intake-slot">
+                    <div className="cv-intake-slot-head">
+                      <strong>{slot.label}</strong>
+                      <span className="cv-intake-slot-hint">{slot.hint}</span>
+                    </div>
+                    <div
+                      className={`cv-dropzone cv-dropzone-compact${file ? " has-file" : ""}`}
+                      onClick={() => inputRefs.current[slot.id]?.click()}
+                      onDrop={(e) => {
+                        e.preventDefault();
+                        onSlotFile(slot.id, e.dataTransfer.files?.[0] || null);
+                      }}
+                      onDragOver={(e) => e.preventDefault()}
+                      role="button"
+                      tabIndex={0}
+                      onKeyDown={(e) => e.key === "Enter" && inputRefs.current[slot.id]?.click()}
+                    >
+                      <div className="cv-dropzone-title">
+                        {file ? file.name : `Add ${slot.label.toLowerCase()}`}
+                      </div>
+                      <div className="cv-dropzone-hint">
+                        {file ? `${(file.size / 1024).toFixed(1)} KB` : slot.hint}
+                      </div>
+                      <input
+                        ref={(el) => { inputRefs.current[slot.id] = el; }}
+                        type="file"
+                        accept={
+                          slot.id === "xray"
+                            ? ".png,.jpg,.jpeg"
+                            : ".pdf,.png,.jpg,.jpeg,.txt,.csv"
+                        }
+                        onChange={(e) => onSlotFile(slot.id, e.target.files?.[0] || null)}
+                        style={{ display: "none" }}
+                      />
+                    </div>
+                    {file && (
+                      <button
+                        type="button"
+                        className="cv-btn cv-btn-ghost cv-btn-sm"
+                        onClick={() => onSlotFile(slot.id, null)}
+                      >
+                        Remove
+                      </button>
+                    )}
                   </div>
-                  <div className="cv-dropzone-hint">
-                    {file ? `${(file.size / 1024).toFixed(1)} KB` : slot.hint}
-                  </div>
-                  <input
-                    ref={(el) => { inputRefs.current[slot.id] = el; }}
-                    type="file"
-                    accept={
-                      slot.id === "xray"
-                        ? ".png,.jpg,.jpeg"
-                        : slot.id === "clinical_note"
-                          ? ".txt"
-                          : ".pdf,.png,.jpg,.jpeg,.txt,.csv"
-                    }
-                    onChange={(e) => onSlotFile(slot.id, e.target.files?.[0] || null)}
-                    style={{ display: "none" }}
-                  />
-                </div>
-                {file && (
-                  <button
-                    type="button"
-                    className="cv-btn cv-btn-ghost cv-btn-sm"
-                    onClick={() => onSlotFile(slot.id, null)}
-                  >
-                    Remove
-                  </button>
-                )}
-              </div>
-            );
-          })}
+                );
+              })}
+            </div>
+          </section>
+
+          <section className="cv-intake-builder-panel" aria-label="Symptom assistant">
+            <div className="cv-intake-builder-panel-head">
+              <h4>Symptom assistant</h4>
+              <span className="cv-intake-builder-panel-hint">Optional — pre-consult triage</span>
+            </div>
+            <SymptomChatPanel
+              messages={symptomMessages || []}
+              onMessagesChange={onSymptomMessagesChange}
+              assessment={symptomAssessment}
+              onAssessmentChange={onSymptomAssessmentChange}
+              assistantMode={assistantMode}
+              onAssistantModeChange={onAssistantModeChange}
+              patientName={patientName}
+              patientAge={patientAge}
+              patientGender={patientGender}
+              disabled={loading}
+            />
+          </section>
         </div>
 
-        {filled.length > 0 && (
+        {manifestParts.length > 0 && (
           <p className="cv-intake-manifest">
-            <strong>{filled.length} document{filled.length === 1 ? "" : "s"}:</strong> {manifest}
+            <strong>Case includes:</strong> {manifestParts.join(" + ")}
           </p>
         )}
       </div>
@@ -222,7 +261,7 @@ export function IntakeCaseDocumentStep({
         <button type="button" className="cv-btn cv-btn-secondary" onClick={onBack}>
           ← Back
         </button>
-        <button type="submit" className="cv-btn cv-btn-primary" disabled={loading || !filled.length}>
+        <button type="submit" className="cv-btn cv-btn-primary" disabled={loading || !canSubmit}>
           {loading ? "Starting analysis…" : "Begin unified AI analysis"}
         </button>
       </div>
@@ -275,7 +314,6 @@ export function IntakeDocumentStep({
             required
           >
             <option value="">Select document type…</option>
-            <option value="clinical_note">Clinical note (TXT)</option>
             <option value="lab_report">Lab report (PDF / CSV / photo)</option>
             <option value="xray">Chest X-ray (PNG / JPG)</option>
           </select>

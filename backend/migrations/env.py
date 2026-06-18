@@ -22,6 +22,8 @@ from backend.model import (  # noqa: F401
     OcrResultModel,
     PatientModel,
     RefreshTokenModel,
+    TriageMessageModel,
+    TriageSessionModel,
     UserModel,
 )
 from backend.model.embedding_model import DocumentEmbeddingModel  # noqa: F401

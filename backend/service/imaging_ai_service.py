@@ -121,3 +121,65 @@ class ImagingAiService(BaseService):
             "skipped": True,
             "latency_ms": latency_ms,
         }
+
+    def reanalyze_encounter(self, encounter_id: uuid.UUID) -> dict[str, Any]:
+        """Re-run ChestNet inference for the latest imaging study on an encounter."""
+        from backend.utils.exceptions import NotFoundException
+        from backend.utils.imaging_regions import derive_anomaly_regions
+        from backend.utils.storage_paths import resolve_storage_file_optional
+
+        study, inference = self._dao.find_imaging_by_encounter(encounter_id)
+        if study is None or inference is None:
+            raise NotFoundException("No imaging study found for this encounter.")
+
+        resolved = resolve_storage_file_optional(study.storage_path)
+        predict_path = str(resolved) if resolved else study.storage_path
+
+        start = time.perf_counter()
+        model = self._model_loader.get_model(ModelType.IMAGING)
+        prediction = self._xray.predict(predict_path)
+        findings = prediction["findings"]
+        confidence = prediction["confidence"]
+        heatmap_path = prediction.get("heatmap_path")
+        regions = prediction.get("regions") or []
+        if not regions:
+            regions = derive_anomaly_regions(predict_path, findings)
+
+        inference.findings = findings
+        inference.confidence_score = confidence
+        inference.heatmap_path = heatmap_path
+        inference.model_version = prediction.get(
+            "model_version", model.get("version", "1.0.0")
+        )
+        inference.bounding_boxes = {
+            "regions": regions,
+            "analysis_proof": {
+                "engine": prediction.get("engine", "unknown"),
+                "txrv_available": self._xray.is_available,
+                "model_version": inference.model_version,
+                "pathology_scores": prediction.get("pathology_scores") or {},
+                "regions": regions,
+            },
+        }
+        study.status = AiProcessingStatus.COMPLETED.value
+        self._session.flush()
+
+        latency_ms = (time.perf_counter() - start) * 1000
+        logger.info(
+            "Imaging reanalysis completed | encounter=%s engine=%s latency_ms=%.2f",
+            encounter_id,
+            prediction.get("engine"),
+            latency_ms,
+        )
+        return {
+            "study_id": str(study.id),
+            "inference_id": str(inference.id),
+            "findings": findings,
+            "heatmap_path": heatmap_path,
+            "confidence": confidence,
+            "skipped": False,
+            "latency_ms": latency_ms,
+            "regions": regions,
+            "engine": prediction.get("engine"),
+            "model_version": inference.model_version,
+        }

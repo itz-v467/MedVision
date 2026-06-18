@@ -11,6 +11,8 @@ from backend.logger import get_logger
 
 logger = get_logger()
 
+from backend.constants.triage_policy import TRIAGE_DISCLAIMER, TRIAGE_SYSTEM_PROMPT
+
 SUMMARY_SYSTEM_PROMPT = (
     "You are a clinical decision support assistant. "
     "Produce concise, evidence-grounded summaries for physician review. "
@@ -227,6 +229,89 @@ class OpenAiClient(SingletonMixin):
             parts.append(
                 f"Grounded on {len(grounded_chunks)} vector-retrieved sources."
             )
+        return " ".join(parts)
+
+    def generate_triage_reply(
+        self,
+        messages: list[dict[str, str]],
+        context: dict[str, Any],
+        assessment: dict[str, Any],
+    ) -> str:
+        """Generate a safe triage assistant reply."""
+        if not self.is_enabled:
+            return self._fallback_triage_reply(messages, assessment)
+
+        prompt_messages = [{"role": "system", "content": TRIAGE_SYSTEM_PROMPT}]
+        context_block = (
+            f"Patient: {context.get('patient_name', 'Unknown')} | "
+            f"Age: {context.get('patient_age', '—')} | "
+            f"Gender: {context.get('patient_gender', '—')}\n"
+            f"Risk level: {assessment.get('risk_level')} | "
+            f"Disposition hint: {assessment.get('recommended_disposition')}\n"
+            f"Encounter context: {json.dumps({k: v for k, v in context.items() if k not in {'nlp_entities', 'imaging_findings'}}, default=str)[:1200]}"
+        )
+        prompt_messages.append({"role": "system", "content": context_block})
+        for msg in messages[-12:]:
+            role = msg.get("role", "user")
+            if role == "patient":
+                role = "user"
+            prompt_messages.append(
+                {"role": role, "content": msg.get("message_text") or msg.get("content") or ""}
+            )
+
+        try:
+            self._ensure_client()
+            response = self._client.chat.completions.create(
+                model=self._settings.openai_llm_model,
+                messages=prompt_messages,
+                temperature=0.2,
+                max_tokens=500,
+            )
+            content = (response.choices[0].message.content or "").strip()
+            return content or self._fallback_triage_reply(messages, assessment)
+        except Exception as exc:
+            logger.warning("Triage reply generation failed: %s", exc)
+            return self._fallback_triage_reply(messages, assessment)
+
+    def _fallback_triage_reply(
+        self, messages: list[dict[str, str]], assessment: dict[str, Any]
+    ) -> str:
+        """Template triage response when LLM is unavailable."""
+        last_user = ""
+        for msg in reversed(messages):
+            if (msg.get("role") or "").lower() in {"user", "patient"}:
+                last_user = msg.get("message_text") or msg.get("content") or ""
+                break
+
+        risk = assessment.get("risk_level", "low")
+        disposition = assessment.get("recommended_disposition", "")
+        parts = [
+            "Thank you for sharing your symptoms.",
+        ]
+        if risk == "emergency":
+            parts.append(
+                "Based on what you described, this may need emergency care. "
+                "Please call your local emergency number now."
+            )
+        elif risk == "high":
+            parts.append("Your symptoms suggest you should seek urgent medical care today.")
+        elif risk == "moderate":
+            parts.append(
+                "Your symptoms may benefit from a clinic visit within the next 1–2 days "
+                "if they continue or worsen."
+            )
+        else:
+            parts.append(
+                "No emergency red flags were detected in your message. "
+                "Rest, hydration, and monitoring may help for mild symptoms."
+            )
+
+        if last_user:
+            parts.append(f"You mentioned: \"{last_user[:180]}\".")
+
+        if disposition:
+            parts.append(disposition)
+        parts.append(TRIAGE_DISCLAIMER)
         return " ".join(parts)
 
 

@@ -35,6 +35,40 @@ export class ClinicalService {
     return HttpClient.request(`/api/clinical/encounters/${encounterId}`);
   }
 
+  static reanalyzeImaging(encounterId) {
+    return HttpClient.request(`/api/clinical/encounters/${encounterId}/imaging/reanalyze`, {
+      method: "POST",
+    });
+  }
+
+  static regenerateSynthesis(encounterId) {
+    return HttpClient.request(`/api/clinical/encounters/${encounterId}/synthesis/regenerate`, {
+      method: "POST",
+    });
+  }
+
+  static getCarePlan(encounterId) {
+    return HttpClient.request(`/api/clinical/encounters/${encounterId}/care-plan`);
+  }
+
+  static approveCarePlan(encounterId) {
+    return HttpClient.request(`/api/clinical/encounters/${encounterId}/care-plan/approve`, {
+      method: "POST",
+    });
+  }
+
+  static requestConsult(encounterId, payload = {}) {
+    return HttpClient.request(`/api/clinical/encounters/${encounterId}/consult/request`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+  }
+
+  static getConsultConfig() {
+    return HttpClient.request("/api/clinical/consult/config");
+  }
+
   static finalizeSummary(summaryId) {
     return HttpClient.request(`/api/clinical/summaries/${summaryId}/finalize`, {
       method: "POST",
@@ -60,5 +94,37 @@ export class ClinicalService {
 
   static previewPatientId() {
     return HttpClient.request("/api/clinical/patients/preview-id");
+  }
+
+  static triageConverse(payload) {
+    return HttpClient.request("/api/clinical/triage/converse", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+  }
+
+  static triageRoadmap() {
+    return HttpClient.request("/api/clinical/triage/roadmap");
+  }
+
+  static triageGetSession(encounterId) {
+    return HttpClient.request(`/api/clinical/encounters/${encounterId}/triage/session`);
+  }
+
+  static triageAddMessage(encounterId, message) {
+    return HttpClient.request(`/api/clinical/encounters/${encounterId}/triage/messages`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ message }),
+    });
+  }
+
+  static triageFinalize(encounterId, physicianNote) {
+    return HttpClient.request(`/api/clinical/encounters/${encounterId}/triage/finalize`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ physician_note: physicianNote }),
+    });
   }
 }

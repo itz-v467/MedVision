@@ -13,6 +13,7 @@ from backend.core.request_context import CurrentUser
 from backend.db import get_database_manager
 from backend.service.ingestion_service import IngestionService
 from backend.service.patient_search_service import PatientSearchService
+from backend.service.symptom_triage_service import SymptomTriageService
 from backend.utils.patient_id_generator import generate_patient_external_id
 from backend.utils.exceptions import ValidationException
 from backend.utils.upload_validation import normalize_file_type
@@ -68,11 +69,14 @@ class ClinicalController(BaseController):
         patient_name: str,
         patient_age: str | None = None,
         patient_gender: str | None = None,
+        symptom_transcript: str | None = None,
     ) -> JSONResponse:
         """Upload multiple documents into one unified clinical case."""
-        if not files:
-            raise ValidationException("At least one file is required.")
-        if len(files) != len(file_types):
+        if not files and not symptom_transcript:
+            raise ValidationException(
+                "Add at least one document or complete the symptom assistant chat."
+            )
+        if files and len(files) != len(file_types):
             raise ValidationException("Each file must have a matching document type.")
 
         documents = []
@@ -87,6 +91,15 @@ class ClinicalController(BaseController):
                 }
             )
 
+        symptom_messages = None
+        if symptom_transcript:
+            import json
+
+            try:
+                symptom_messages = json.loads(symptom_transcript)
+            except json.JSONDecodeError as exc:
+                raise ValidationException("Invalid symptom transcript payload.") from exc
+
         with get_database_manager().session_scope() as session:
             result = IngestionService(session).upload_case(
                 user_id=current_user.user_id,
@@ -95,6 +108,7 @@ class ClinicalController(BaseController):
                 documents=documents,
                 patient_age=patient_age,
                 patient_gender=patient_gender,
+                symptom_messages=symptom_messages,
             )
         return ResponseBuilder.success(result)
 
@@ -173,6 +187,141 @@ class ClinicalController(BaseController):
                 encounter_id
             )
         return FileResponse(path, media_type=media_type)
+
+    def reanalyze_imaging(
+        self, encounter_id: uuid.UUID, current_user: CurrentUser
+    ) -> JSONResponse:
+        """Re-run chest X-ray inference for an existing encounter."""
+        with get_database_manager().session_scope() as session:
+            data = IngestionService(session).reanalyze_imaging(
+                encounter_id, current_user.user_id
+            )
+        return ResponseBuilder.success(data)
+
+    def regenerate_synthesis(
+        self, encounter_id: uuid.UUID, current_user: CurrentUser
+    ) -> JSONResponse:
+        """Rebuild doctor-style synthesis from all encounter inputs."""
+        with get_database_manager().session_scope() as session:
+            data = IngestionService(session).regenerate_synthesis(
+                encounter_id, current_user.user_id
+            )
+        return ResponseBuilder.success(data)
+
+    def get_care_plan(self, encounter_id: uuid.UUID) -> JSONResponse:
+        with get_database_manager().session_scope() as session:
+            from backend.service.care_plan_service import CarePlanService
+
+            data = CarePlanService(session).get_care_plan(encounter_id)
+        return ResponseBuilder.success(data)
+
+    def approve_care_plan(
+        self, encounter_id: uuid.UUID, current_user: CurrentUser
+    ) -> JSONResponse:
+        with get_database_manager().session_scope() as session:
+            from backend.service.care_plan_service import CarePlanService
+
+            data = CarePlanService(session).approve_care_plan(
+                encounter_id, current_user.user_id
+            )
+        return ResponseBuilder.success(data)
+
+    def request_consult(
+        self,
+        encounter_id: uuid.UUID,
+        current_user: CurrentUser,
+        payload: dict,
+    ) -> JSONResponse:
+        with get_database_manager().session_scope() as session:
+            from backend.service.consult_request_service import ConsultRequestService
+
+            data = ConsultRequestService(session).create_request(
+                encounter_id,
+                current_user.user_id,
+                urgency=payload.get("urgency"),
+                reason=payload.get("reason"),
+                external_link_used=bool(payload.get("external_link_used")),
+            )
+        return ResponseBuilder.success(data)
+
+    def consult_queue(self, _user: CurrentUser) -> JSONResponse:
+        with get_database_manager().session_scope() as session:
+            from backend.service.consult_request_service import ConsultRequestService
+
+            data = ConsultRequestService(session).list_queue()
+        return ResponseBuilder.success({"requests": data})
+
+    def consult_config(self) -> JSONResponse:
+        from backend.service.consult_request_service import ConsultRequestService
+
+        return ResponseBuilder.success(ConsultRequestService.get_config_static())
+
+    def triage_converse_intake(
+        self,
+        current_user: CurrentUser,
+        payload: dict,
+    ) -> JSONResponse:
+        """Intake-time symptom chat (before encounter creation)."""
+        with get_database_manager().session_scope() as session:
+            data = SymptomTriageService(session).converse_intake(
+                user_id=current_user.user_id,
+                message=str(payload.get("message", "")),
+                history=payload.get("messages") or [],
+                patient_name=payload.get("patient_name"),
+                patient_age=payload.get("patient_age"),
+                patient_gender=payload.get("patient_gender"),
+            )
+        return ResponseBuilder.success(data)
+
+    def triage_get_session(self, encounter_id: uuid.UUID) -> JSONResponse:
+        """Return triage session for an encounter."""
+        with get_database_manager().session_scope() as session:
+            data = SymptomTriageService(session).get_session(encounter_id)
+        return ResponseBuilder.success(data)
+
+    def triage_create_session(
+        self, encounter_id: uuid.UUID, current_user: CurrentUser
+    ) -> JSONResponse:
+        """Create triage session for encounter."""
+        with get_database_manager().session_scope() as session:
+            data = SymptomTriageService(session).create_session(
+                encounter_id, current_user.user_id
+            )
+        return ResponseBuilder.success(data)
+
+    def triage_add_message(
+        self,
+        encounter_id: uuid.UUID,
+        current_user: CurrentUser,
+        message: str,
+    ) -> JSONResponse:
+        """Add message to encounter triage session."""
+        with get_database_manager().session_scope() as session:
+            data = SymptomTriageService(session).add_message(
+                encounter_id, current_user.user_id, message
+            )
+        return ResponseBuilder.success(data)
+
+    def triage_finalize(
+        self,
+        encounter_id: uuid.UUID,
+        current_user: CurrentUser,
+        physician_note: str | None = None,
+    ) -> JSONResponse:
+        """Finalize triage session after physician review."""
+        with get_database_manager().session_scope() as session:
+            data = SymptomTriageService(session).finalize_session(
+                encounter_id,
+                current_user.user_id,
+                physician_note=physician_note,
+            )
+        return ResponseBuilder.success(data)
+
+    def triage_roadmap(self) -> JSONResponse:
+        """Return staged advanced triage capabilities."""
+        with get_database_manager().session_scope() as session:
+            data = SymptomTriageService(session).get_roadmap()
+        return ResponseBuilder.success({"roadmap": data})
 
     def get_task_status(self, task_id: str) -> JSONResponse:
         """Return status of a celery background task."""

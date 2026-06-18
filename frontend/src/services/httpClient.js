@@ -102,8 +102,8 @@ export class HttpClient {
         message = "This action is not available — please restart the backend (docker compose up --build).";
       } else if (response.status === 403) {
         message = payload.message || "You do not have permission for this action.";
-      } else if (response.status === 404) {
-        message = payload.message || "Record not found.";
+      } else if (response.status === 500) {
+        message = payload.message || "Server error — please try again.";
       }
       const error = new Error(message);
       error.code = payload.error_code;

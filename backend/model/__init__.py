@@ -1,5 +1,6 @@
 """ORM models package."""
 
+from backend.model.consult_model import ConsultRequestModel
 from backend.model.document_model import (
     AiMetricModel,
     AlertModel,
@@ -16,9 +17,11 @@ from backend.model.patient_embedding_model import PatientEmbeddingModel
 from backend.model.encounter_model import EncounterModel
 from backend.model.patient_model import PatientModel
 from backend.model.refresh_token_model import RefreshTokenModel
+from backend.model.triage_model import TriageMessageModel, TriageSessionModel
 from backend.model.user_model import UserModel
 
 __all__ = [
+    "ConsultRequestModel",
     "DocumentEmbeddingModel",
     "PatientEmbeddingModel",
     "AiMetricModel",
@@ -33,5 +36,7 @@ __all__ = [
     "OcrResultModel",
     "PatientModel",
     "RefreshTokenModel",
+    "TriageMessageModel",
+    "TriageSessionModel",
     "UserModel",
 ]

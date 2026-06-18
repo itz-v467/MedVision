@@ -58,6 +58,8 @@ class SettingsManager(SingletonMixin):
         self.openai_lab_extraction_enabled: bool = os.getenv(
             "OPENAI_LAB_EXTRACTION_ENABLED", "true"
         ).lower() in ("1", "true", "yes")
+        self.gemini_api_key: str = os.getenv("GEMINI_API_KEY", "")
+        self.gemini_llm_model: str = os.getenv("GEMINI_LLM_MODEL", "gemini-2.5-flash")
         self.embedding_model_name: str = os.getenv(
             "EMBEDDING_MODEL_NAME", "sentence-transformers/all-MiniLM-L6-v2"
         )
@@ -81,6 +83,12 @@ class SettingsManager(SingletonMixin):
     def openai_enabled(self) -> bool:
         """Return True when OpenAI API key is configured."""
         return bool(self.openai_api_key.strip())
+
+    @property
+    def gemini_enabled(self) -> bool:
+        """Return True when Gemini API key is configured."""
+        key = self.gemini_api_key.strip()
+        return bool(key) and key != "dummy_key"
 
 
 def get_settings() -> SettingsManager:

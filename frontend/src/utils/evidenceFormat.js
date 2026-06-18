@@ -33,6 +33,7 @@ const FINDING_COPY = {
 const DOC_TYPE_LABELS = {
   xray: "Chest X-ray",
   lab_report: "Laboratory report",
+  symptom_triage: "Symptom triage",
   clinical_note: "Clinical note",
 };
 
@@ -426,6 +427,36 @@ function buildCorrelationSource(detail) {
   };
 }
 
+function buildTriageSource(detail) {
+  const triage = detail?.triage;
+  const session = triage?.session;
+  if (!session) return null;
+
+  const messages = triage.messages || [];
+  const patientLines = messages
+    .filter((m) => m.role === "patient")
+    .map((m) => m.message_text)
+    .slice(0, 4);
+
+  return {
+    id: "triage",
+    title: "Symptom triage chat",
+    summary: `${session.risk_level} urgency · ${patientLines.length} patient message(s)`,
+    detailTitle: "Patient-reported symptoms (triage guidance only)",
+    intro:
+      "Symptoms collected through the intake assistant. This is not a diagnosis — physician review is required.",
+    cards: [
+      {
+        label: "Urgency level",
+        value: session.risk_level,
+        note: session.recommended_disposition || "",
+        tone: ["high", "emergency"].includes(session.risk_level) ? "alert" : undefined,
+      },
+    ],
+    highlights: patientLines,
+  };
+}
+
 function buildReferencesSource(detail) {
   const evidenceBundle = detail?.summary?.evidence_sources;
   if (!evidenceBundle || typeof evidenceBundle !== "object") return null;
@@ -478,6 +509,7 @@ function buildReferencesSource(detail) {
 export function buildEvidenceSources(detail) {
   const builders = [
     buildDocumentSource,
+    buildTriageSource,
     buildTermsSource,
     buildImagingSource,
     buildCorrelationSource,

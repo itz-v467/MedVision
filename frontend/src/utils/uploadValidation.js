@@ -8,7 +8,6 @@ const EXTENSION_MIME_MAP = {
 };
 
 const FILE_TYPE_MIME_MAP = {
-  clinical_note: ["text/plain"],
   lab_report: ["application/pdf", "text/csv", "image/png", "image/jpeg"],
   xray: ["image/png", "image/jpeg"],
 };
@@ -17,7 +16,6 @@ const IMAGING_NAME_HINTS = /xray|x-?ray|chest|thorax|pneu|pna|lung|radiograph|cx
 const LAB_NAME_HINTS = /lab|blood|cbc|panel|pathology|metabolic|hemoglobin|glucose/i;
 
 const FILE_TYPE_LABELS = {
-  clinical_note: "Clinical Note (TXT)",
   lab_report: "Lab Report (PDF / CSV / Photo)",
   xray: "Chest X-Ray (PNG / JPG)",
 };
@@ -38,7 +36,7 @@ export function suggestFileType(file) {
   const mime = resolveMimeType(file);
   const name = file.name || "";
 
-  if (mime === "text/plain") return "clinical_note";
+  if (mime === "text/plain") return null;
   if (mime === "application/pdf" || mime === "text/csv") return "lab_report";
   if (mime === "image/png" || mime === "image/jpeg") {
     if (IMAGING_NAME_HINTS.test(name)) return "xray";

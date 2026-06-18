@@ -35,7 +35,7 @@ function imagingStatusTone(status) {
   return "warn";
 }
 
-export function PremiumImagingViewer({ imaging, fileName }) {
+export function PremiumImagingViewer({ imaging, fileName, onReanalyze, reanalyzing = false }) {
   const [heatmapOpacity, setHeatmapOpacity] = useState(45);
   const [showHeatmap, setShowHeatmap] = useState(true);
   const [showRegions, setShowRegions] = useState(true);
@@ -92,7 +92,7 @@ export function PremiumImagingViewer({ imaging, fileName }) {
   const detected = findings.filter(([, data]) => data?.detected);
   const isFallback = proof.is_fallback || String(imaging.model_version || "").startsWith("fallback");
   const engineLabel = isFallback
-    ? "Fallback scorer (TorchXRayVision not installed)"
+    ? "Placeholder scorer (real ChestNet analysis failed or was unavailable)"
     : "TorchXRayVision / ChestNet DenseNet";
 
   return (
@@ -160,10 +160,22 @@ export function PremiumImagingViewer({ imaging, fileName }) {
         </div>
         {isFallback && (
           <p className="cv-imaging-proof-note">
-            Proof: model shows <strong>fallback-1.0.0</strong> because TorchXRayVision is not installed in this
-            backend. Install <code>requirements-ml.txt</code> and rebuild Docker for real ChestNet scores.
-            Check <code>GET /health/imaging</code> on the API.
+            Scores show <strong>12% placeholder values</strong> because the real ChestNet run failed
+            (often a preprocessing error). Click <strong>Re-analyze X-ray</strong> below to run
+            TorchXRayVision again, or upload the image once more.
           </p>
+        )}
+        {onReanalyze && (
+          <div className="cv-imaging-reanalyze">
+            <button
+              type="button"
+              className="cv-btn cv-btn-secondary"
+              onClick={onReanalyze}
+              disabled={reanalyzing}
+            >
+              {reanalyzing ? "Re-analyzing…" : "Re-analyze X-ray"}
+            </button>
+          </div>
         )}
       </div>
 

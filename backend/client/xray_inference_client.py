@@ -16,7 +16,7 @@ logger = get_logger()
 # Map FRD finding keys to TorchXRayVision pathology labels
 PATHOLOGY_MAP: dict[str, list[str]] = {
     "pneumothorax": ["Pneumothorax"],
-    "opacity": ["Consolidation", "Infiltration", "Pneumonia"],
+    "opacity": ["Lung Opacity", "Consolidation", "Infiltration", "Pneumonia"],
     "pleural_effusion": ["Effusion"],
     "nodule": ["Nodule", "Mass"],
     "cardiomegaly": ["Cardiomegaly"],
@@ -121,6 +121,9 @@ class XrayInferenceClient(SingletonMixin):
         if img.ndim == 3:
             img = img.mean(axis=2)
         img = self._xrv.datasets.normalize(img, 255)
+        # TXRV transforms expect channel-first tensors (C, H, W).
+        if img.ndim == 2:
+            img = img[None, ...]
         img = self._transform(img)
         tensor = self._torch.from_numpy(img).unsqueeze(0).to(self._device)
 

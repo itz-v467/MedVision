@@ -619,6 +619,126 @@ body {
   margin: 0 auto;
 }
 
+.cv-intake.cv-intake-wide {
+  max-width: 1040px;
+}
+
+.cv-intake-card-wide {
+  padding: var(--cv-space-4);
+}
+
+.cv-intake-builder {
+  display: grid;
+  grid-template-columns: minmax(280px, 1fr) minmax(320px, 1fr);
+  gap: var(--cv-space-3);
+  align-items: start;
+  margin-top: var(--cv-space-3);
+}
+
+@media (max-width: 900px) {
+  .cv-intake-builder {
+    grid-template-columns: 1fr;
+  }
+}
+
+.cv-intake-builder-panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--cv-space-2);
+  min-height: 100%;
+}
+
+.cv-intake-builder-panel-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.cv-intake-builder-panel-head h4 {
+  margin: 0;
+  font-size: var(--cv-text-base);
+  font-weight: 700;
+}
+
+.cv-intake-builder-panel-hint {
+  font-size: var(--cv-text-xs);
+  color: var(--cv-slate-500);
+}
+
+.cv-symptom-chat-head-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.cv-triage-risk-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-size: var(--cv-text-xs);
+  font-weight: 700;
+  border: 1px solid var(--cv-border);
+  background: var(--cv-slate-50);
+  white-space: nowrap;
+}
+
+.cv-triage-risk-chip.is-emergency,
+.cv-triage-risk-chip.is-high {
+  border-color: var(--cv-critical);
+  background: #fef2f2;
+  color: #991b1b;
+}
+
+.cv-triage-risk-chip.is-moderate {
+  border-color: var(--cv-warning);
+  background: #fffbeb;
+  color: #92400e;
+}
+
+.cv-triage-risk-chip.is-low {
+  border-color: var(--cv-success);
+  background: #ecfdf5;
+  color: #065f46;
+}
+
+.cv-symptom-chat-disposition {
+  margin: 8px 0 0;
+  font-size: var(--cv-text-sm);
+  color: var(--cv-slate-700);
+}
+
+.cv-symptom-chat-escalation {
+  margin: 8px 0 0;
+  padding: 8px 10px;
+  border-radius: var(--cv-radius-sm);
+  background: #fef2f2;
+  border: 1px solid var(--cv-critical);
+  color: #991b1b;
+  font-size: var(--cv-text-sm);
+  font-weight: 600;
+}
+
+.cv-intake-builder-panel .cv-symptom-chat-thread {
+  max-height: 360px;
+  min-height: 280px;
+}
+
+.cv-symptom-chat-mode {
+  display: inline-block;
+  margin-top: 6px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: var(--cv-text-xs);
+  font-weight: 600;
+  background: var(--cv-slate-100);
+  color: var(--cv-slate-600);
+}
+
 .cv-intake-steps {
   display: flex;
   gap: 0;
@@ -1114,6 +1234,122 @@ body {
   line-height: 1.45;
   margin: 0 0 var(--cv-space-3);
   color: var(--cv-slate-900);
+}
+
+.cv-synthesis-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: var(--cv-space-3);
+}
+
+.cv-synthesis-tab {
+  border: 1px solid var(--cv-border);
+  background: var(--cv-surface);
+  color: var(--cv-slate-600);
+  border-radius: 999px;
+  padding: 6px 14px;
+  font-size: var(--cv-text-sm);
+  cursor: pointer;
+}
+
+.cv-synthesis-tab.is-active {
+  background: var(--cv-primary-muted);
+  border-color: var(--cv-primary);
+  color: var(--cv-primary);
+  font-weight: 600;
+}
+
+.cv-synthesis-panel {
+  margin-bottom: var(--cv-space-2);
+}
+
+.cv-physician-headline {
+  font-size: var(--cv-text-lg);
+}
+
+.cv-correlation-narrative,
+.cv-correlation-narrative-block {
+  font-size: var(--cv-text-sm);
+  line-height: 1.6;
+  color: var(--cv-slate-600);
+  margin: 0 0 var(--cv-space-3);
+}
+
+.cv-leading-diagnosis {
+  background: var(--cv-primary-muted);
+  border-left: 4px solid var(--cv-primary);
+  padding: var(--cv-space-3);
+  border-radius: var(--cv-radius-md);
+  margin-bottom: var(--cv-space-3);
+}
+
+.cv-leading-diagnosis.is-patient {
+  background: var(--cv-success-bg);
+  border-left-color: var(--cv-success);
+}
+
+.cv-leading-label {
+  display: block;
+  font-size: var(--cv-text-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--cv-slate-500);
+  margin-bottom: 4px;
+}
+
+.cv-confidence-chip {
+  display: inline-block;
+  margin-left: 8px;
+  font-size: var(--cv-text-xs);
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--cv-surface);
+}
+
+.cv-confidence-chip.is-high { color: var(--cv-critical); }
+.cv-confidence-chip.is-moderate { color: var(--cv-warning); }
+.cv-confidence-chip.is-low { color: var(--cv-slate-500); }
+
+.cv-root-cause,
+.cv-differential,
+.cv-workup-list {
+  margin-top: var(--cv-space-3);
+}
+
+.cv-root-cause h4,
+.cv-differential h4,
+.cv-workup-list h4 {
+  margin: 0 0 8px;
+  font-size: var(--cv-text-sm);
+}
+
+.cv-differential-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: grid;
+  gap: 10px;
+}
+
+.cv-differential-list li {
+  border: 1px solid var(--cv-border);
+  border-radius: var(--cv-radius-md);
+  padding: 12px;
+  background: var(--cv-surface);
+}
+
+.cv-diff-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.cv-differential-list li p {
+  margin: 4px 0 0;
+  font-size: var(--cv-text-sm);
+  color: var(--cv-slate-600);
 }
 
 .cv-finding-attention {
@@ -2315,4 +2551,455 @@ body {
 .cv-imaging-status.is-warn {
   border-color: var(--cv-warning);
   background: #fffbeb;
+}
+
+/* Symptom triage chat */
+.cv-symptom-chat {
+  border: 1px solid var(--cv-border);
+  border-radius: var(--cv-radius);
+  padding: var(--cv-space-3);
+  background: #fff;
+}
+
+.cv-symptom-chat-head h4 {
+  margin: 0 0 4px;
+}
+
+.cv-symptom-chat-head p {
+  margin: 0 0 var(--cv-space-2);
+  font-size: var(--cv-text-sm);
+  color: var(--cv-slate-600);
+}
+
+.cv-intake-slot-chat {
+  margin-top: var(--cv-space-2);
+}
+
+.cv-symptom-chat-thread {
+  max-height: 280px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-bottom: var(--cv-space-2);
+  padding: var(--cv-space-2);
+  background: var(--cv-slate-50);
+  border-radius: var(--cv-radius);
+}
+
+.cv-symptom-chat-bubble {
+  max-width: 92%;
+  padding: 10px 12px;
+  border-radius: 12px;
+  font-size: var(--cv-text-sm);
+}
+
+.cv-symptom-chat-bubble.is-patient {
+  align-self: flex-end;
+  background: var(--cv-primary);
+  color: #fff;
+}
+
+.cv-symptom-chat-bubble.is-assistant {
+  align-self: flex-start;
+  background: #fff;
+  border: 1px solid var(--cv-border);
+}
+
+.cv-symptom-chat-role {
+  display: block;
+  font-size: var(--cv-text-xs);
+  font-weight: 700;
+  opacity: 0.85;
+  margin-bottom: 4px;
+}
+
+.cv-symptom-chat-bubble p {
+  margin: 0;
+}
+
+.cv-symptom-chat-input-row {
+  display: flex;
+  gap: 8px;
+}
+
+.cv-symptom-chat-input {
+  flex: 1;
+  padding: 10px 12px;
+  border: 1px solid var(--cv-border);
+  border-radius: var(--cv-radius);
+}
+
+.cv-symptom-chat-disclaimer,
+.cv-symptom-chat-status {
+  font-size: var(--cv-text-xs);
+  color: var(--cv-slate-500);
+  margin-top: 8px;
+}
+
+.cv-symptom-chat-error {
+  color: var(--cv-critical);
+  font-size: var(--cv-text-sm);
+}
+
+.cv-symptom-chat-typing {
+  font-size: var(--cv-text-sm);
+  color: var(--cv-slate-500);
+  font-style: italic;
+}
+
+.cv-triage-panel .cv-triage-risk {
+  padding: var(--cv-space-2) var(--cv-space-3);
+  border-radius: var(--cv-radius);
+  margin-bottom: var(--cv-space-2);
+  font-size: var(--cv-text-sm);
+  background: var(--cv-slate-50);
+  border: 1px solid var(--cv-border);
+}
+
+.cv-triage-risk.is-emergency,
+.cv-triage-risk.is-high {
+  border-color: var(--cv-critical);
+  background: #fef2f2;
+}
+
+.cv-triage-risk.is-moderate {
+  border-color: var(--cv-warning);
+  background: #fffbeb;
+}
+
+.cv-triage-rationale {
+  margin: 0 0 var(--cv-space-2);
+  padding-left: 18px;
+  font-size: var(--cv-text-sm);
+  color: var(--cv-slate-600);
+}
+
+.cv-triage-thread {
+  max-height: 320px;
+}
+
+.cv-triage-physician textarea {
+  width: 100%;
+  margin: 8px 0;
+  padding: 8px;
+  border: 1px solid var(--cv-border);
+  border-radius: var(--cv-radius);
+}
+
+.cv-triage-finalized {
+  color: var(--cv-success);
+  font-weight: 600;
+  font-size: var(--cv-text-sm);
+}
+
+/* Doctor-grade care plan & consult */
+.cv-synthesis-disclaimer {
+  margin: 8px 0 0;
+  font-size: var(--cv-text-xs);
+  color: var(--cv-warning);
+}
+
+.cv-factor-card {
+  background: var(--cv-surface);
+  border: 1px solid var(--cv-border);
+  border-radius: var(--cv-radius-md);
+  padding: var(--cv-space-3);
+  margin-bottom: var(--cv-space-3);
+}
+
+.cv-factor-card-title {
+  margin: 0 0 var(--cv-space-2);
+  font-size: var(--cv-text-sm);
+  color: var(--cv-slate-700);
+}
+
+.cv-factor-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: var(--cv-space-2);
+}
+
+.cv-factor-label {
+  display: block;
+  font-size: var(--cv-text-xs);
+  color: var(--cv-slate-500);
+  margin-bottom: 2px;
+}
+
+.cv-factor-tag {
+  display: inline-block;
+  margin-left: 6px;
+  font-size: var(--cv-text-xs);
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: var(--cv-warning-bg);
+  color: var(--cv-warning);
+}
+
+.cv-factor-symptoms {
+  margin: var(--cv-space-2) 0 0;
+  font-size: var(--cv-text-sm);
+  color: var(--cv-slate-600);
+}
+
+.cv-diseases-report {
+  margin-bottom: var(--cv-space-3);
+}
+
+.cv-diseases-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.cv-diseases-list > li {
+  border: 1px solid var(--cv-border);
+  border-radius: var(--cv-radius-md);
+  padding: var(--cv-space-3);
+  margin-bottom: var(--cv-space-2);
+}
+
+.cv-diseases-list > li.is-high {
+  border-left: 4px solid var(--cv-critical);
+}
+
+.cv-diseases-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.cv-diseases-rank {
+  font-size: var(--cv-text-xs);
+  color: var(--cv-slate-500);
+}
+
+.cv-diseases-missing {
+  margin: 8px 0 0;
+  font-size: var(--cv-text-xs);
+  color: var(--cv-slate-500);
+}
+
+.cv-care-plan-banner {
+  background: var(--cv-warning-bg);
+  border: 1px solid var(--cv-warning);
+  border-radius: var(--cv-radius-md);
+  padding: var(--cv-space-2) var(--cv-space-3);
+  font-size: var(--cv-text-sm);
+  margin-bottom: var(--cv-space-3);
+}
+
+.cv-care-plan-body {
+  margin-top: var(--cv-space-3);
+  padding: var(--cv-space-3);
+  border: 1px solid var(--cv-border);
+  border-radius: var(--cv-radius-md);
+}
+
+.cv-care-plan-status {
+  font-size: var(--cv-text-sm);
+  color: var(--cv-warning);
+  margin: 0 0 var(--cv-space-2);
+}
+
+.cv-care-plan-status.is-approved {
+  color: var(--cv-success);
+}
+
+.cv-recovery-summary {
+  background: var(--cv-success-bg);
+  border-radius: var(--cv-radius-md);
+  padding: var(--cv-space-3);
+  margin-top: var(--cv-space-2);
+}
+
+.cv-factors-review {
+  margin-bottom: var(--cv-space-3);
+  font-size: var(--cv-text-sm);
+  line-height: 1.6;
+}
+
+.cv-consult-card {
+  margin-top: var(--cv-space-4);
+  padding: var(--cv-space-3);
+  border: 1px solid var(--cv-border);
+  border-radius: var(--cv-radius-md);
+  background: var(--cv-primary-muted);
+}
+
+.cv-consult-reason {
+  font-size: var(--cv-text-sm);
+  margin: 0 0 var(--cv-space-2);
+}
+
+.cv-consult-urgency {
+  font-size: var(--cv-text-sm);
+  margin: 0 0 var(--cv-space-3);
+}
+
+.cv-consult-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--cv-space-2);
+}
+
+.cv-consult-status {
+  margin-top: var(--cv-space-2);
+  font-size: var(--cv-text-xs);
+  color: var(--cv-slate-500);
+}
+
+.cv-symptom-chat-missing {
+  margin: 0 0 var(--cv-space-2);
+  padding: var(--cv-space-2);
+  background: var(--cv-primary-muted);
+  border-radius: var(--cv-radius-md);
+  font-size: var(--cv-text-sm);
+}
+
+/* Structured clinical summary blocks */
+.cv-structured-summary {
+  margin-bottom: var(--cv-space-3);
+}
+
+.cv-structured-summary-title {
+  margin: 0 0 var(--cv-space-2);
+  font-size: var(--cv-text-sm);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--cv-slate-600);
+}
+
+.cv-structured-summary-grid {
+  display: grid;
+  gap: var(--cv-space-2);
+}
+
+.cv-summary-block {
+  border-radius: var(--cv-radius-md);
+  padding: var(--cv-space-3);
+  border: 1px solid var(--cv-border);
+  background: var(--cv-surface);
+}
+
+.cv-summary-block-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.cv-summary-block-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  font-size: 11px;
+  font-weight: 700;
+  flex-shrink: 0;
+}
+
+.cv-summary-block-label {
+  font-size: var(--cv-text-xs);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.cv-summary-block-list {
+  margin: 0;
+  padding-left: 18px;
+  font-size: var(--cv-text-sm);
+  line-height: 1.6;
+  color: var(--cv-slate-700);
+}
+
+.cv-summary-block-list li + li {
+  margin-top: 6px;
+}
+
+.cv-summary-block--info {
+  border-left: 4px solid #3b82f6;
+  background: #eff6ff;
+}
+.cv-summary-block--info .cv-summary-block-icon { background: #dbeafe; color: #1d4ed8; }
+.cv-summary-block--info .cv-summary-block-label { color: #1e40af; }
+
+.cv-summary-block--warning {
+  border-left: 4px solid var(--cv-warning);
+  background: var(--cv-warning-bg);
+}
+.cv-summary-block--warning .cv-summary-block-icon { background: #fef3c7; color: #b45309; }
+.cv-summary-block--warning .cv-summary-block-label { color: #92400e; }
+
+.cv-summary-block--success {
+  border-left: 4px solid var(--cv-success);
+  background: var(--cv-success-bg);
+}
+.cv-summary-block--success .cv-summary-block-icon { background: #d1fae5; color: #047857; }
+.cv-summary-block--success .cv-summary-block-label { color: #065f46; }
+
+.cv-summary-block--clinical {
+  border-left: 4px solid #0d9488;
+  background: #f0fdfa;
+}
+.cv-summary-block--clinical .cv-summary-block-icon { background: #ccfbf1; color: #0f766e; }
+.cv-summary-block--clinical .cv-summary-block-label { color: #115e59; }
+
+.cv-summary-block--objective {
+  border-left: 4px solid #6366f1;
+  background: #eef2ff;
+}
+.cv-summary-block--objective .cv-summary-block-icon { background: #e0e7ff; color: #4338ca; }
+.cv-summary-block--objective .cv-summary-block-label { color: #3730a3; }
+
+.cv-summary-block--labs {
+  border-left: 4px solid #a855f7;
+  background: #faf5ff;
+}
+.cv-summary-block--labs .cv-summary-block-icon { background: #f3e8ff; color: #7e22ce; }
+.cv-summary-block--labs .cv-summary-block-label { color: #6b21a8; }
+
+.cv-summary-block--impression {
+  border-left: 4px solid var(--cv-primary);
+  background: var(--cv-primary-muted);
+}
+.cv-summary-block--impression .cv-summary-block-icon { background: #dbeafe; color: var(--cv-primary); }
+.cv-summary-block--impression .cv-summary-block-label { color: var(--cv-primary); }
+
+.cv-summary-block--neutral {
+  border-left: 4px solid var(--cv-slate-400);
+  background: var(--cv-slate-50, #f8fafc);
+}
+.cv-summary-block--neutral .cv-summary-block-icon { background: var(--cv-border); color: var(--cv-slate-600); }
+.cv-summary-block--neutral .cv-summary-block-label { color: var(--cv-slate-600); }
+
+.cv-leading-condition {
+  display: block;
+  font-size: var(--cv-text-base);
+  margin: 4px 0 8px;
+}
+
+.cv-leading-diagnosis .cv-structured-summary {
+  margin-top: var(--cv-space-2);
+  margin-bottom: 0;
+}
+
+.cv-leading-diagnosis .cv-structured-summary-grid {
+  gap: 6px;
+}
+
+.cv-leading-diagnosis .cv-summary-block {
+  padding: var(--cv-space-2);
+  background: rgba(255, 255, 255, 0.65);
+}
+
+.cv-root-cause .cv-structured-summary {
+  margin-top: 8px;
 }

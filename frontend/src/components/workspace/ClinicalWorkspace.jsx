@@ -134,7 +134,7 @@ export function ClinicalWorkspace({
             <section className="cv-panel cv-panel-pad">
               <h2 style={{ margin: "0 0 8px", fontSize: "0.9375rem", fontWeight: 600 }}>New report</h2>
               <p className="mv-empty-hint" style={{ marginBottom: 16 }}>
-                Upload a lab report, clinical note, or imaging study for analysis.
+                Upload a lab report, chest X-ray, or describe symptoms with the assistant.
               </p>
               <Link to={AppRoutes.UPLOAD} className="cv-btn cv-btn-primary cv-btn-block">
                 Upload

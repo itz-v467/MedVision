@@ -1,11 +1,12 @@
 /** Turn dense AI summary text into scannable patient-friendly bullets. */
 
 export function formatClinicalSummary(summaryText = "", labAnalysis = null, options = {}) {
-  const { docType, imaging } = options;
+  const { docType, imaging, synthesis } = options;
   const precautions = labAnalysis?.precautions || [];
   const wellness = labAnalysis?.wellness_notes || [];
 
   let headline =
+    synthesis?.patient_summary?.split(".")[0] ||
     labAnalysis?.clinical_summary?.split(".")[0] ||
     (precautions.length
       ? `${precautions.length} result(s) need your doctor's attention.`
@@ -15,9 +16,16 @@ export function formatClinicalSummary(summaryText = "", labAnalysis = null, opti
 
   if (docType === "xray") {
     headline =
+      synthesis?.patient_summary?.split(".")[0] ||
       labAnalysis?.clinical_summary?.split(".")[0] ||
       formatImagingHeadline(imaging);
   }
+
+  const patientHeadline = synthesis?.patient_summary || headline;
+  const physicianHeadline =
+    synthesis?.physician_summary ||
+    synthesis?.leading_diagnosis?.condition ||
+    headline;
 
   const attention = precautions.map((p) => ({
     test: p.test,
@@ -28,24 +36,24 @@ export function formatClinicalSummary(summaryText = "", labAnalysis = null, opti
   const healthy = wellness.slice(0, 6).map((w) => w.test);
 
   let doctorNote = "";
-  if (summaryText) {
-    doctorNote = summaryText
+  const physicianSource = synthesis?.physician_summary || summaryText;
+  if (physicianSource) {
+    doctorNote = physicianSource
       .replace(/Grounded on \d+ vector-retrieved sources\.?/gi, "")
       .replace(/Physician review required\.?/gi, "")
       .replace(/Correlate with symptoms and local lab reference ranges\.?/gi, "")
       .replace(/\s+/g, " ")
       .trim();
-    if (doctorNote.length > 280) {
-      doctorNote = `${doctorNote.slice(0, 277)}…`;
-    }
   }
 
   return {
     headline,
+    patientHeadline,
+    physicianHeadline,
     attention,
     healthy,
     doctorNote,
-    showFullNote: Boolean(doctorNote && doctorNote.length > 50),
+    showFullNote: Boolean(doctorNote && doctorNote.length > 40),
   };
 }
 

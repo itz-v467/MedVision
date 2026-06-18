@@ -49,6 +49,7 @@ export function plainStatus(status) {
 export function plainDocType(type) {
   if (type === "lab_report") return "Blood / lab report";
   if (type === "xray") return "Chest X-ray";
+  if (type === "symptom_triage") return "Symptom triage chat";
   if (type === "clinical_note") return "Doctor's notes";
   return type || "Medical document";
 }
@@ -67,7 +68,7 @@ export const UI_LABELS = {
   identitySkipped: "Could not read name from report — please verify manually",
   analysisOverview: "Your health report at a glance",
   pipelineTrace: "How your report was processed",
-  uploadTitle: "Upload a health document",
+  uploadTitle: "Start a new clinical case",
   patientSection: "About the patient",
   documentSection: "Document to upload",
   deleteRecord: "Remove this record",

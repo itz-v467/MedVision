@@ -49,6 +49,18 @@ class EmbeddingClient(SingletonMixin):
             return
         from sentence_transformers import SentenceTransformer
 
+        cache_folder = (
+            os.getenv("SENTENCE_TRANSFORMERS_HOME")
+            or os.getenv("HF_HOME")
+            or os.getenv("XDG_CACHE_HOME")
+        )
+        if cache_folder:
+            os.makedirs(cache_folder, exist_ok=True)
+            self._model = SentenceTransformer(
+                self._settings.embedding_model_name,
+                cache_folder=cache_folder,
+            )
+            return
         self._model = SentenceTransformer(self._settings.embedding_model_name)
 
     def embed(self, text_content: str) -> list[float]:

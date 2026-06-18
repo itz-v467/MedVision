@@ -1,15 +1,18 @@
 /** Cross-modal lab↔imaging correlation cards for unified cases. */
 
-export function CorrelationCards({ correlation }) {
+export function CorrelationCards({ correlation, narrative }) {
   const cards = correlation?.cards || [];
-  if (!cards.length) return null;
+  if (!cards.length && !narrative) return null;
 
   return (
     <section className="cv-section" aria-labelledby="correlation-heading">
       <h2 className="cv-section-title" id="correlation-heading">Cross-modal correlation</h2>
       <p className="cv-section-sub">
-        Automated links between laboratory results and chest imaging — for physician review only.
+        How symptoms, labs, and imaging fit together — for physician review only.
       </p>
+      {narrative && (
+        <p className="cv-correlation-narrative-block">{narrative}</p>
+      )}
       <div className="cv-correlation-grid">
         {cards.map((card, idx) => (
           <article

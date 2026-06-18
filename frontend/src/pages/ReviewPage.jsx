@@ -8,6 +8,7 @@ import { LabResultsTable } from "../components/LabResultsTable";
 import { PatientTimeline } from "../components/PatientTimeline.jsx";
 import { ClinicalFindingsPanel } from "../components/review/ClinicalFindingsPanel";
 import { CorrelationCards } from "../components/review/CorrelationCards";
+import { SymptomTriagePanel } from "../components/review/SymptomTriagePanel";
 import { EvidenceChain } from "../components/review/EvidenceChain";
 import { IdentityCard } from "../components/review/IdentityCard";
 import { PremiumImagingViewer } from "../components/review/PremiumImagingViewer";
@@ -75,7 +76,7 @@ function inferRisk(alerts) {
 function caseTypeBadge(caseType) {
   if (caseType === "multimodal") return "Multimodal case";
   if (caseType === "single_xray") return "Chest X-ray case";
-  if (caseType === "single_lab") return "Lab report case";
+  if (caseType === "symptom_triage") return "Symptom triage case";
   return null;
 }
 
@@ -91,6 +92,10 @@ export function ReviewPage() {
   const [success, setSuccess] = useState("");
   const [deepTab, setDeepTab] = useState("raw");
   const [evidenceId, setEvidenceId] = useState(null);
+  const [reanalyzingImaging, setReanalyzingImaging] = useState(false);
+  const [regeneratingSynthesis, setRegeneratingSynthesis] = useState(false);
+  const [approvingCarePlan, setApprovingCarePlan] = useState(false);
+  const [requestingConsult, setRequestingConsult] = useState(false);
 
   const load = useCallback(async () => {
     if (!encounterId) return;
@@ -109,6 +114,71 @@ export function ReviewPage() {
   }, [encounterId]);
 
   useEffect(() => { load(); }, [load]);
+
+  const handleReanalyzeImaging = async () => {
+    if (!encounterId) return;
+    setReanalyzingImaging(true);
+    setError("");
+    try {
+      const result = await clinicalApi.reanalyzeImaging(encounterId);
+      setDetail((prev) => (prev ? { ...prev, imaging: result.imaging } : prev));
+      setSuccess("Chest X-ray re-analyzed with ChestNet.");
+    } catch (err) {
+      setError(err.message || "Could not re-analyze chest X-ray.");
+    } finally {
+      setReanalyzingImaging(false);
+    }
+  };
+
+  const handleRegenerateSynthesis = async () => {
+    if (!encounterId) return;
+    setRegeneratingSynthesis(true);
+    setError("");
+    try {
+      await clinicalApi.regenerateSynthesis(encounterId);
+      await load();
+      setSuccess("Case synthesis refreshed from all inputs.");
+    } catch (err) {
+      const msg =
+        err.status === 500
+          ? "Could not refresh case synthesis. Please try again."
+          : (err.message || "Could not refresh case synthesis.");
+      setError(msg);
+    } finally {
+      setRegeneratingSynthesis(false);
+    }
+  };
+
+  const handleApproveCarePlan = async () => {
+    if (!encounterId) return;
+    setApprovingCarePlan(true);
+    setError("");
+    try {
+      await clinicalApi.approveCarePlan(encounterId);
+      await load();
+      setSuccess("Care plan approved by physician.");
+    } catch (err) {
+      setError(err.message || "Could not approve care plan.");
+    } finally {
+      setApprovingCarePlan(false);
+    }
+  };
+
+  const handleRequestConsult = async (payload) => {
+    if (!encounterId) return;
+    if (payload?.external_link_used) return;
+    setRequestingConsult(true);
+    setError("");
+    try {
+      await clinicalApi.requestConsult(encounterId, payload);
+      await load();
+      setSuccess("Consult request submitted.");
+    } catch (err) {
+      setError(err.message || "Could not submit consult request.");
+    } finally {
+      setRequestingConsult(false);
+    }
+  };
 
   const handleFinalize = async () => {
     const summaryId = detail?.summary?.id;
@@ -243,17 +313,49 @@ export function ReviewPage() {
 
       <ClinicalFindingsPanel
         summaryText={detail?.summary?.summary_text}
+        synthesis={detail?.summary?.clinical_synthesis || detail?.summary}
         labAnalysis={derived?.labAnalysis}
         docType={derived?.primaryDocType}
         imaging={detail?.imaging}
+        correlation={detail?.correlation}
         confidence={derived?.confidence}
         isFinalized={detail?.summary?.status === "FINALIZED"}
         canReview={canReview}
         onFinalize={handleFinalize}
         finalizing={finalizing}
+        onRegenerateSynthesis={handleRegenerateSynthesis}
+        regeneratingSynthesis={regeneratingSynthesis}
+        clinicalFactors={
+          detail?.summary?.clinical_factors
+          || detail?.summary?.evidence_sources?.global_context?.clinical_factors
+        }
+        carePlan={detail?.summary?.care_plan}
+        possibleDiseasesReport={detail?.summary?.possible_diseases_report || []}
+        consultRecommendation={detail?.summary?.consult_recommendation}
+        consultConfig={detail?.consult?.config}
+        consultRequest={detail?.consult?.request}
+        documents={detail?.documents || []}
+        patternMatches={
+          detail?.summary?.evidence_sources?.global_context?.pattern_matches?.pattern_matches
+          || []
+        }
+        onApproveCarePlan={canReview ? handleApproveCarePlan : undefined}
+        approvingCarePlan={approvingCarePlan}
+        onRequestConsult={handleRequestConsult}
+        requestingConsult={requestingConsult}
       />
 
-      <CorrelationCards correlation={detail?.correlation} />
+      <CorrelationCards
+        correlation={detail?.correlation}
+        narrative={detail?.summary?.correlation_narrative}
+      />
+
+      <SymptomTriagePanel
+        triage={detail?.triage}
+        encounterId={encounterId}
+        canReview={canReview}
+        onUpdated={load}
+      />
 
       {derived?.showLab && (
         <section className="cv-lab-panel" aria-labelledby="lab-results-heading">
@@ -280,6 +382,8 @@ export function ReviewPage() {
         <PremiumImagingViewer
           imaging={detail.imaging}
           fileName={derived.xrayFile}
+          onReanalyze={handleReanalyzeImaging}
+          reanalyzing={reanalyzingImaging}
         />
       )}
 

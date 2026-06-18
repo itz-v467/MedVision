@@ -13,7 +13,6 @@ import { validateImageContent, validateUpload } from "../utils/uploadValidation"
 const EMPTY_SLOTS = {
   lab_report: null,
   xray: null,
-  clinical_note: null,
 };
 
 function validatePatientForm({ patientName, patientAge }) {
@@ -33,6 +32,9 @@ function validatePatientForm({ patientName, patientAge }) {
 export function UploadPage() {
   const [step, setStep] = useState(1);
   const [slotFiles, setSlotFiles] = useState(EMPTY_SLOTS);
+  const [symptomMessages, setSymptomMessages] = useState([]);
+  const [symptomAssessment, setSymptomAssessment] = useState(null);
+  const [assistantMode, setAssistantMode] = useState(null);
   const [patientName, setPatientName] = useState("");
   const [patientId, setPatientId] = useState("");
   const [previewId, setPreviewId] = useState("");
@@ -89,8 +91,10 @@ export function UploadPage() {
   const handleUpload = async (event) => {
     event.preventDefault();
     const entries = Object.entries(slotFiles).filter(([, file]) => Boolean(file));
-    if (!entries.length) {
-      setError("Add at least one document (lab report, chest X-ray, or clinical note).");
+    const symptomTurns = symptomMessages.filter((m) => m.role === "patient").length;
+
+    if (!entries.length && symptomTurns === 0) {
+      setError("Add at least one document or describe symptoms in the assistant chat.");
       return;
     }
 
@@ -124,9 +128,12 @@ export function UploadPage() {
     formData.append("patient_name", patientName.trim());
     if (patientAge) formData.append("patient_age", patientAge.trim());
     if (patientGender) formData.append("patient_gender", patientGender);
+    if (symptomTurns > 0) {
+      formData.append("symptom_transcript", JSON.stringify(symptomMessages));
+    }
 
     try {
-      const data = entries.length === 1
+      const data = entries.length === 1 && symptomTurns === 0
         ? await clinicalApi.uploadSingleLegacy(entries[0][1], entries[0][0], formData)
         : await clinicalApi.uploadCase(formData);
       setPipeline(data.pipeline || null);
@@ -147,6 +154,9 @@ export function UploadPage() {
     setStep(1);
     setEncounterId(null);
     setSlotFiles(EMPTY_SLOTS);
+    setSymptomMessages([]);
+    setSymptomAssessment(null);
+    setAssistantMode(null);
     setPipeline(null);
     setUploadResult(null);
     setPatientName("");
@@ -164,10 +174,10 @@ export function UploadPage() {
   const currentStep = encounterId ? 4 : loading ? 3 : step;
 
   return (
-    <div className="cv-intake">
+    <div className={`cv-intake${step === 2 ? " cv-intake-wide" : ""}`}>
       <header className="cv-intake-header">
-        <h1>{UI_LABELS.uploadTitle}</h1>
-        <p>Upload lab reports, chest X-rays, and notes in one case for a unified doctor report.</p>
+        <h1>Start a new clinical case</h1>
+        <p>Upload lab reports, chest X-rays, and describe symptoms for a unified doctor report.</p>
       </header>
 
       <IntakeStepIndicator currentStep={currentStep} />
@@ -195,6 +205,15 @@ export function UploadPage() {
           slotFiles={slotFiles}
           onSlotFile={handleSlotFile}
           inputRefs={inputRefs}
+          symptomMessages={symptomMessages}
+          onSymptomMessagesChange={setSymptomMessages}
+          symptomAssessment={symptomAssessment}
+          onSymptomAssessmentChange={setSymptomAssessment}
+          assistantMode={assistantMode}
+          onAssistantModeChange={(mode) => setAssistantMode(mode)}
+          patientName={patientName}
+          patientAge={patientAge}
+          patientGender={patientGender}
           onBack={() => { setStep(1); setError(""); }}
           onSubmit={handleUpload}
           loading={loading}

@@ -16,6 +16,32 @@ os.environ.setdefault("KMP_DUPLICATE_LIB_OK", "TRUE")
 
 _paddle_ocr = None
 _easyocr_reader = None
+_paddle_enabled: bool | None = None
+
+
+def _paddle_is_usable() -> bool:
+    """Return True when PaddleOCR can be imported and initialized safely."""
+    global _paddle_enabled
+    if _paddle_enabled is not None:
+        return _paddle_enabled
+    if os.getenv("PADDLEOCR_ENABLED", "true").lower() == "false":
+        _paddle_enabled = False
+        return False
+    try:
+        from paddleocr import PaddleOCR  # noqa: F401
+        _paddle_enabled = True
+    except Exception as exc:
+        logger.warning("PaddleOCR unavailable; using EasyOCR/Tesseract only: %s", exc)
+        _paddle_enabled = False
+    return _paddle_enabled
+
+
+def _disable_paddle(reason: str) -> None:
+    """Permanently skip Paddle for this process after a runtime failure."""
+    global _paddle_enabled
+    if _paddle_enabled is not False:
+        logger.warning("Disabling PaddleOCR for this process: %s", reason)
+    _paddle_enabled = False
 
 
 def get_ocr_capabilities() -> dict[str, bool]:
@@ -26,7 +52,7 @@ def get_ocr_capabilities() -> dict[str, bool]:
         "pymupdf": _can_import("fitz"),
         "tesseract": False,
         "easyocr": _can_import("easyocr"),
-        "paddleocr": _can_import("paddleocr"),
+        "paddleocr": _paddle_is_usable(),
     }
     try:
         import pytesseract
@@ -91,17 +117,20 @@ def extract_pdf_text(path: Path) -> tuple[str, float, str]:
     return clean_ocr_lab_text(text), best_conf, method
 
 
-def extract_image_text(path: Path) -> tuple[str, float, str]:
+def extract_image_text(path: Path, *, use_paddle: bool = True) -> tuple[str, float, str]:
     """Run all image OCR engines and merge for maximum lab text recovery."""
     chunks: list[str] = []
     methods: list[str] = []
     best_conf = 0.2
 
-    for extractor in (
+    extractors = [
         _extract_image_easyocr,
         _extract_image_tesseract,
-        _extract_image_paddle,
-    ):
+    ]
+    if use_paddle and _paddle_is_usable():
+        extractors.append(_extract_image_paddle)
+
+    for extractor in extractors:
         text, confidence = extractor(path)
         if text.strip():
             chunks.append(text)
@@ -124,6 +153,15 @@ def _can_import(module_name: str) -> bool:
         __import__(module_name)
         return True
     except ImportError:
+        return False
+    except RuntimeError as exc:
+        # PaddleX/PaddleOCR may raise on repeated initialization even when installed.
+        # Treat this specific case as available so capability checks never crash requests.
+        if module_name == "paddleocr" and "already been initialized" in str(exc).lower():
+            logger.debug("Ignoring paddleocr re-initialization warning during capability check")
+            return True
+        return False
+    except Exception:
         return False
 
 
@@ -201,7 +239,7 @@ def _extract_pdf_page_ocr(path: Path) -> tuple[str, float]:
                 try:
                     pix = page.get_pixmap(dpi=300)
                     pix.save(str(tmp_path))
-                    text, _conf, _method = extract_image_text(tmp_path)
+                    text, _conf, _method = extract_image_text(tmp_path, use_paddle=False)
                     if text.strip():
                         chunks.append(text)
                 finally:
@@ -296,9 +334,12 @@ def _extract_image_easyocr(path: Path) -> tuple[str, float]:
 
 def _extract_image_paddle(path: Path) -> tuple[str, float]:
     global _paddle_ocr
+    if not _paddle_is_usable():
+        return "", 0.2
     try:
         from paddleocr import PaddleOCR
-    except ImportError:
+    except Exception as exc:
+        _disable_paddle(str(exc))
         return "", 0.2
 
     try:
@@ -328,5 +369,7 @@ def _extract_image_paddle(path: Path) -> tuple[str, float]:
             text = "\n".join(lines).strip()
         return text, 0.78 if text else 0.2
     except Exception as exc:
+        if "already been initialized" in str(exc).lower():
+            _disable_paddle(str(exc))
         logger.warning("PaddleOCR failed: %s", exc)
         return "", 0.2

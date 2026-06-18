@@ -30,6 +30,8 @@ services:
     build:
       context: .
       dockerfile: backend/Dockerfile
+    env_file:
+      - .env
     environment:
       FLASK_ENV: development
       DATABASE_URL: postgresql://medvision:medvision@postgres:5432/medvision
@@ -40,12 +42,22 @@ services:
       STORAGE_PATH: /data/uploads
       LOG_LEVEL: DEBUG
       KMP_DUPLICATE_LIB_OK: "TRUE"
+      HOME: /data/home
+      HF_HOME: /data/cache/huggingface
+      XDG_CACHE_HOME: /data/cache
+      SENTENCE_TRANSFORMERS_HOME: /data/cache/sentence-transformers
+      PADDLEX_HOME: /data/cache/paddlex
+      IMAGING_WEIGHTS_DIR: /data/models/imaging
+      IMAGING_DEVICE: cpu
+      IMAGING_MODEL_NAME: densenet121-res224-all
     ports:
       - "5000:5000"
     volumes:
       - ./backend:/app/backend
       - ./backend/logs:/app/backend/logs
       - upload_data:/data/uploads
+      - model_cache:/data/cache
+      - imaging_models:/data/models
     depends_on:
       postgres:
         condition: service_healthy
@@ -105,5 +117,7 @@ services:
 volumes:
   postgres_data:
   upload_data:
+  model_cache:
+  imaging_models:
   qdrant_data:
   orthanc_data:

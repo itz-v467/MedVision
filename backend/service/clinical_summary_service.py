@@ -9,6 +9,8 @@ from typing import Any
 
 from sqlalchemy.orm import Session
 
+from backend.service.care_plan_service import CarePlanService
+from backend.client.clinical_synthesis_client import get_clinical_synthesis_client
 from backend.client.ml_model_loader import get_ml_model_loader
 from backend.client.openai_client import get_openai_client
 from backend.core.base_service import BaseService
@@ -25,7 +27,7 @@ logger = get_logger()
 
 
 class ClinicalSummaryService(BaseService):
-    """Generates RAG-grounded clinical summaries."""
+    """Generates RAG-grounded clinical summaries with dual patient/physician views."""
 
     def __init__(self, session: Session) -> None:
         """Initialize dependencies."""
@@ -34,15 +36,18 @@ class ClinicalSummaryService(BaseService):
         self._model_loader = get_ml_model_loader()
         self._rag = RagIndexingService(session)
         self._openai = get_openai_client()
+        self._synthesis = get_clinical_synthesis_client()
+        self._care_plan = CarePlanService(session)
 
     def generate_summary(
         self, encounter_id: uuid.UUID, context: dict[str, Any]
     ) -> dict[str, Any]:
-        """Generate AI summary requiring physician review."""
+        """Generate AI synthesis requiring physician review."""
         start = time.perf_counter()
         model = self._model_loader.get_model(ModelType.RAG)
         logger.info("Summary generation started | encounter=%s", encounter_id)
 
+        global_context = context.get("global_context") or {}
         context_text = json.dumps(context, default=str)
         self._rag.index_text(
             encounter_id,
@@ -62,13 +67,46 @@ class ClinicalSummaryService(BaseService):
                 {"type": "ocr_text"},
             )
 
+        triage = context.get("triage") or {}
+        triage_text = "\n".join(
+            f"{msg.get('role', 'patient')}: {msg.get('message_text') or msg.get('content') or ''}"
+            for msg in (triage.get("messages") or [])
+        )
+        if triage_text.strip():
+            self._rag.index_text(
+                encounter_id,
+                "triage",
+                str(encounter_id),
+                triage_text,
+                {"type": "symptom_transcript"},
+            )
+
         grounded_chunks = self._rag.retrieve_context(
             encounter_id,
-            "clinical summary evidence imaging labs symptoms",
+            "clinical summary evidence imaging labs symptoms correlation diagnosis",
         )
 
-        summary_text = self._openai.generate_summary(context, grounded_chunks)
-        evidence = {**context, "rag_chunks": grounded_chunks}
+        if global_context:
+            clinical_synthesis = self._synthesis.synthesize(
+                global_context, grounded_chunks
+            )
+            care_plan = self._care_plan.extract_from_synthesis(clinical_synthesis)
+            summary_text = (
+                clinical_synthesis.get("physician_summary")
+                or self._openai.generate_summary(context, grounded_chunks)
+            )
+        else:
+            clinical_synthesis = {}
+            care_plan = {}
+            summary_text = self._openai.generate_summary(context, grounded_chunks)
+
+        evidence = {
+            **context,
+            "rag_chunks": grounded_chunks,
+            "clinical_synthesis": clinical_synthesis,
+            "care_plan": care_plan,
+            "global_context": global_context,
+        }
         summary = ClinicalSummaryModel(
             encounter_id=encounter_id,
             summary_text=summary_text,
@@ -83,6 +121,18 @@ class ClinicalSummaryService(BaseService):
             "summary_text": summary_text,
             "status": summary.status,
             "evidence_sources": evidence,
+            "clinical_synthesis": clinical_synthesis,
+            "care_plan": care_plan,
+            "patient_summary": clinical_synthesis.get("patient_summary"),
+            "physician_summary": clinical_synthesis.get("physician_summary"),
+            "clinical_factors_review": clinical_synthesis.get("clinical_factors_review"),
+            "leading_diagnosis": clinical_synthesis.get("leading_diagnosis"),
+            "differential": clinical_synthesis.get("differential", []),
+            "possible_diseases_report": clinical_synthesis.get("possible_diseases_report", []),
+            "root_cause_analysis": clinical_synthesis.get("root_cause_analysis"),
+            "correlation_narrative": clinical_synthesis.get("correlation_narrative"),
+            "recommended_workup": clinical_synthesis.get("recommended_workup", []),
+            "consult_recommendation": clinical_synthesis.get("consult_recommendation"),
             "message": Messages.SUMMARY_PENDING_REVIEW.value,
             "model_version": model.get("version", "1.0.0"),
             "latency_ms": latency_ms,

@@ -17,6 +17,7 @@ from backend.client.lab_text_parser import (
 from backend.logger import get_logger
 from backend.utils.lab_reference_ranges import REFERENCE_RANGES, enrich_biomarkers
 from backend.utils.lab_value_normalizer import clean_ocr_lab_text, normalize_biomarker
+from backend.utils.storage_paths import resolve_storage_file_optional
 
 logger = get_logger()
 
@@ -71,8 +72,8 @@ def extract_text_from_file(storage_path: str, mime_type: str) -> tuple[str, floa
     Returns:
         Tuple of raw text, confidence, and extraction method name.
     """
-    path = Path(storage_path)
-    if not path.exists():
+    path = resolve_storage_file_optional(storage_path)
+    if path is None or not path.exists():
         return "", 0.0, "missing_file"
 
     if mime_type == "text/plain":

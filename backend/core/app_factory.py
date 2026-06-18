@@ -119,6 +119,69 @@ class AppFactory:
                 ]
             )
 
+        table_names = set(inspector.get_table_names())
+        if "triage_sessions" not in table_names:
+            statements.extend(
+                [
+                    """
+                    CREATE TABLE IF NOT EXISTS triage_sessions (
+                        id UUID PRIMARY KEY,
+                        encounter_id UUID NOT NULL REFERENCES encounters(id),
+                        patient_id UUID NOT NULL REFERENCES patients(id),
+                        status VARCHAR(30) NOT NULL DEFAULT 'active',
+                        risk_level VARCHAR(20) NOT NULL DEFAULT 'low',
+                        recommended_disposition TEXT,
+                        assessment JSONB NOT NULL DEFAULT '{}',
+                        created_by UUID REFERENCES users(id),
+                        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                        finalized_at TIMESTAMPTZ
+                    )
+                    """,
+                    "CREATE INDEX IF NOT EXISTS ix_triage_sessions_encounter_id "
+                    "ON triage_sessions (encounter_id)",
+                    "CREATE INDEX IF NOT EXISTS ix_triage_sessions_patient_id "
+                    "ON triage_sessions (patient_id)",
+                    "CREATE INDEX IF NOT EXISTS ix_triage_sessions_status "
+                    "ON triage_sessions (status)",
+                    """
+                    CREATE TABLE IF NOT EXISTS triage_messages (
+                        id UUID PRIMARY KEY,
+                        session_id UUID NOT NULL REFERENCES triage_sessions(id),
+                        role VARCHAR(20) NOT NULL,
+                        message_text TEXT NOT NULL,
+                        structured_symptoms JSONB NOT NULL DEFAULT '{}',
+                        safety_flags JSONB NOT NULL DEFAULT '{}',
+                        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                    )
+                    """,
+                    "CREATE INDEX IF NOT EXISTS ix_triage_messages_session_id "
+                    "ON triage_messages (session_id)",
+                ]
+            )
+
+        if "consult_requests" not in table_names:
+            statements.extend(
+                [
+                    """
+                    CREATE TABLE IF NOT EXISTS consult_requests (
+                        id UUID PRIMARY KEY,
+                        encounter_id UUID NOT NULL REFERENCES encounters(id),
+                        patient_id UUID NOT NULL REFERENCES patients(id),
+                        requested_by_user_id UUID NOT NULL REFERENCES users(id),
+                        urgency VARCHAR(30) NOT NULL DEFAULT 'within_24h',
+                        reason TEXT,
+                        status VARCHAR(30) NOT NULL DEFAULT 'pending',
+                        external_link_used BOOLEAN NOT NULL DEFAULT FALSE,
+                        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                    )
+                    """,
+                    "CREATE INDEX IF NOT EXISTS ix_consult_requests_encounter_id "
+                    "ON consult_requests (encounter_id)",
+                    "CREATE INDEX IF NOT EXISTS ix_consult_requests_status "
+                    "ON consult_requests (status)",
+                ]
+            )
+
         if not statements:
             return
 
@@ -127,6 +190,13 @@ class AppFactory:
                 connection.execute(text(statement))
         logger.info("Applied unified-case schema patch (%d statement(s))", len(statements))
 
+        stamp_revision = (
+            "005_consult_requests"
+            if "consult_requests" not in table_names
+            else "004_triage_tables"
+            if "triage_sessions" not in table_names
+            else "003_unified_case_columns"
+        )
         try:
             from pathlib import Path
 
@@ -135,7 +205,7 @@ class AppFactory:
 
             ini_path = Path(__file__).resolve().parents[1] / "migrations" / "alembic.ini"
             alembic_cfg = Config(str(ini_path))
-            command.stamp(alembic_cfg, "003_unified_case_columns")
+            command.stamp(alembic_cfg, stamp_revision)
         except Exception as exc:
             logger.warning("Could not stamp Alembic revision: %s", exc)
 

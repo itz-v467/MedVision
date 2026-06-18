@@ -23,6 +23,9 @@ from backend.service.clinical_correlation_engine import ClinicalCorrelationEngin
 from backend.service.clinical_summary_service import ClinicalSummaryService
 from backend.service.encounter_fusion_service import EncounterFusionService
 from backend.service.explainability_service import ExplainabilityService
+from backend.service.clinical_factor_extractor_service import ClinicalFactorExtractorService
+from backend.service.disease_pattern_engine import DiseasePatternEngine
+from backend.service.global_encounter_context_service import GlobalEncounterContextService
 from backend.service.imaging_ai_service import ImagingAiService
 from backend.service.longitudinal_analysis_service import LongitudinalAnalysisService
 from backend.service.medical_nlp_service import MedicalNlpService
@@ -37,6 +40,7 @@ from backend.utils.pipeline_tracker import (
     summarize_pipeline_step,
 )
 from backend.service.patient_search_service import PatientSearchService
+from backend.service.symptom_triage_service import SymptomTriageService
 from backend.utils.case_type import infer_case_type
 from backend.utils.imaging_summary import format_imaging_summary, imaging_attention_items
 from backend.utils.imaging_regions import compute_imaging_status, derive_anomaly_regions
@@ -76,6 +80,9 @@ class IngestionService(BaseService):
         self._longitudinal = LongitudinalAnalysisService(session)
         self._fusion = EncounterFusionService()
         self._clinical_correlation = ClinicalCorrelationEngine()
+        self._global_context = GlobalEncounterContextService()
+        self._factor_extractor = ClinicalFactorExtractorService()
+        self._pattern_engine = DiseasePatternEngine()
 
     def upload_and_process(
         self,
@@ -114,10 +121,22 @@ class IngestionService(BaseService):
         documents: list[dict[str, Any]],
         patient_age: str | None = None,
         patient_gender: str | None = None,
+        symptom_messages: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
         """Upload one or more documents into a single encounter and run unified AI pipeline."""
-        if not documents:
-            raise ValidationException("At least one clinical document is required.")
+        if not documents and not symptom_messages:
+            raise ValidationException(
+                "Add at least one document or complete the symptom assistant chat."
+            )
+        if not documents and symptom_messages:
+            return self._create_symptom_case(
+                user_id=user_id,
+                patient_external_id=patient_external_id,
+                patient_name=patient_name,
+                symptom_messages=symptom_messages,
+                patient_age=patient_age,
+                patient_gender=patient_gender,
+            )
 
         validated_docs: list[dict[str, Any]] = []
         for doc in documents:
@@ -258,6 +277,38 @@ class IngestionService(BaseService):
             nlp_record["summary"] = summarize_pipeline_step("nlp", nlp_result, case_type)
 
         fused["nlp_confidence"] = nlp_result.get("confidence", 0)
+        fused["nlp_entities"] = nlp_result.get("entities", {})
+
+        triage_data = None
+        if symptom_messages:
+            triage_data = SymptomTriageService(self._session).import_transcript(
+                encounter.id, user_id, symptom_messages
+            )
+        fused["triage"] = triage_data
+
+        clinical_factors = self._factor_extractor.extract(
+            patient={
+                "full_name": patient.full_name,
+                "date_of_birth": patient.date_of_birth,
+                "gender": patient.gender,
+            },
+            triage_data=triage_data,
+            merged_text=merged_text,
+            chief_complaint=encounter.chief_complaint,
+        )
+        fused["clinical_factors"] = clinical_factors
+
+        partial_context = {
+            "clinical_factors": clinical_factors,
+            "labs": {"biomarkers": fused.get("biomarkers") or []},
+            "imaging_flags": {
+                name: data
+                for name, data in (imaging_result.get("findings") or {}).items()
+                if isinstance(data, dict) and data.get("detected")
+            },
+        }
+        pattern_matches = self._pattern_engine.match(partial_context)
+        fused["pattern_matches"] = pattern_matches
 
         corr_label, corr_detail = plain_step_label("correlation")
         with tracker.run_step("correlation", corr_label, corr_detail) as correlation_record:
@@ -305,6 +356,26 @@ class IngestionService(BaseService):
         with tracker.run_step("rag", rag_label, rag_detail) as rag_record:
             rag_record["summary"] = "Preparing multimodal context"
 
+        global_context = self._global_context.build(
+            fused=fused,
+            nlp_result=nlp_result,
+            imaging_result=imaging_result,
+            correlation=correlation,
+            triage_data=triage_data,
+            patient={
+                "full_name": patient.full_name,
+                "external_id": patient.external_id,
+                "date_of_birth": patient.date_of_birth,
+                "gender": patient.gender,
+            },
+            encounter={
+                "id": str(encounter.id),
+                "case_type": case_type,
+                "chief_complaint": encounter.chief_complaint,
+            },
+            pattern_matches=pattern_matches,
+        )
+
         sum_label, sum_detail = plain_step_label("summary")
         with tracker.run_step("summary", sum_label, sum_detail) as summary_record:
             summary = self._summary.generate_summary(
@@ -318,6 +389,8 @@ class IngestionService(BaseService):
                     "imaging": imaging_result,
                     "correlation": correlation,
                     "fused": fused,
+                    "triage": triage_data,
+                    "global_context": global_context,
                 },
             )
             summary_record["summary"] = summarize_pipeline_step("summary", summary, case_type)
@@ -384,6 +457,131 @@ class IngestionService(BaseService):
                 }
                 for item in document_results
             ],
+            "triage": triage_data,
+            "message": Messages.AI_PROCESSING_COMPLETE.value,
+        }
+
+    def _create_symptom_case(
+        self,
+        *,
+        user_id: uuid.UUID,
+        patient_external_id: str,
+        patient_name: str,
+        symptom_messages: list[dict[str, Any]],
+        patient_age: str | None = None,
+        patient_gender: str | None = None,
+    ) -> dict[str, Any]:
+        """Create encounter from symptom chat only (no file uploads)."""
+        patient_external_id = resolve_patient_external_id(self._session, patient_external_id)
+        patient = (
+            self._session.query(PatientModel)
+            .filter(PatientModel.external_id == patient_external_id)
+            .first()
+        )
+        if patient is None:
+            patient = PatientModel(
+                external_id=patient_external_id,
+                full_name=patient_name,
+                date_of_birth=patient_age,
+                gender=patient_gender,
+            )
+            self._session.add(patient)
+            self._session.flush()
+        PatientSearchService(self._session).index_patient(patient)
+
+        merged_text = "\n".join(
+            msg.get("message_text") or msg.get("content") or ""
+            for msg in symptom_messages
+            if (msg.get("role") or "").lower() in {"patient", "user"}
+        )
+        encounter = EncounterModel(
+            patient_id=patient.id,
+            assigned_user_id=user_id,
+            status=AiProcessingStatus.PROCESSING.value,
+            case_type="symptom_triage",
+            chief_complaint=merged_text[:500] or None,
+        )
+        self._encounter_dao.create(encounter)
+
+        nlp_result = self._nlp.process_encounter(encounter.id, merged_text)
+        triage_data = SymptomTriageService(self._session).import_transcript(
+            encounter.id, user_id, symptom_messages
+        )
+        clinical_factors = self._factor_extractor.extract(
+            patient={
+                "full_name": patient_name,
+                "date_of_birth": patient_age,
+                "gender": patient_gender,
+            },
+            triage_data=triage_data,
+            merged_text=merged_text,
+            chief_complaint=merged_text[:500],
+        )
+        partial_context = {
+            "clinical_factors": clinical_factors,
+            "labs": {"biomarkers": []},
+            "imaging_flags": {},
+        }
+        pattern_matches = self._pattern_engine.match(partial_context)
+        fused_symptom = {
+            "case_type": "symptom_triage",
+            "biomarkers": [],
+            "triage": triage_data,
+            "clinical_factors": clinical_factors,
+            "pattern_matches": pattern_matches,
+            "nlp_confidence": nlp_result.get("confidence", 0),
+            "nlp_entities": nlp_result.get("entities", {}),
+            "imaging": {"skipped": True, "findings": {}},
+            "ocr_confidence": 0,
+        }
+        correlation = self._clinical_correlation.correlate(fused_symptom)
+        global_context = self._global_context.build(
+            fused={"case_type": "symptom_triage", "biomarkers": [], "merged_text": merged_text},
+            nlp_result=nlp_result,
+            imaging_result={"skipped": True, "findings": {}},
+            correlation=correlation,
+            triage_data=triage_data,
+            patient={
+                "full_name": patient_name,
+                "date_of_birth": patient_age,
+                "gender": patient_gender,
+            },
+            encounter={
+                "id": str(encounter.id),
+                "case_type": "symptom_triage",
+                "chief_complaint": merged_text[:500] or None,
+            },
+            pattern_matches=pattern_matches,
+        )
+        summary = self._summary.generate_summary(
+            encounter.id,
+            {
+                "file_type": "symptom_triage",
+                "case_type": "symptom_triage",
+                "ocr": {"structured_data": {"raw_text_preview": merged_text}},
+                "nlp": nlp_result,
+                "imaging": {"skipped": True},
+                "correlation": correlation,
+                "triage": triage_data,
+                "global_context": global_context,
+            },
+        )
+        encounter.status = AiProcessingStatus.REVIEW_REQUIRED.value
+        self._encounter_dao.update(encounter)
+
+        return {
+            "encounter_id": str(encounter.id),
+            "document_id": None,
+            "document_ids": [],
+            "patient_external_id": patient.external_id,
+            "patient_id": str(patient.id),
+            "case_type": "symptom_triage",
+            "correlation": correlation,
+            "pipeline": {"steps": [{"id": "triage", "label": "Symptom triage", "status": "completed"}]},
+            "summary": summary,
+            "nlp": nlp_result,
+            "triage": triage_data,
+            "documents": [],
             "message": Messages.AI_PROCESSING_COMPLETE.value,
         }
 
@@ -467,7 +665,9 @@ class IngestionService(BaseService):
             doc.file_type for doc in documents
         )
         file_type = case_type if case_type == "multimodal" else (
-            documents[0].file_type if documents else "clinical_note"
+            documents[0].file_type
+            if documents
+            else ("symptom_triage" if case_type == "symptom_triage" else "lab_report")
         )
         results_overview = None
         if structured:
@@ -482,6 +682,12 @@ class IngestionService(BaseService):
                 imaging_result=imaging,
                 correlation=correlation,
             )
+
+        from backend.service.consult_request_service import ConsultRequestService
+
+        consult_service = ConsultRequestService(self._session)
+        consult_config = consult_service.get_config()
+        consult_request = consult_service._dao.find_by_encounter(encounter_id)
 
         return {
             "encounter": {
@@ -530,6 +736,15 @@ class IngestionService(BaseService):
                 }
                 for alert in alerts
             ],
+            "triage": SymptomTriageService(self._session).get_session(encounter_id),
+            "consult": {
+                "config": consult_config,
+                "request": (
+                    consult_service._serialize(consult_request, patient)
+                    if consult_request
+                    else None
+                ),
+            },
         }
 
     def acknowledge_alert(
@@ -560,7 +775,141 @@ class IngestionService(BaseService):
         if inference is None or not inference.heatmap_path:
             raise NotFoundException("Heatmap not available for this encounter.")
 
-        return str(self._validate_storage_file(inference.heatmap_path))
+        return str(resolve_storage_file(inference.heatmap_path))
+
+    def reanalyze_imaging(
+        self, encounter_id: uuid.UUID, user_id: uuid.UUID
+    ) -> dict[str, Any]:
+        """Re-run chest X-ray AI on the stored study and refresh persisted results."""
+        encounter = self._encounter_dao.find_by_id(encounter_id)
+        if encounter is None:
+            raise NotFoundException("Encounter not found.")
+
+        self._imaging.reanalyze_encounter(encounter_id)
+        study, inference = self._document_dao.find_imaging_by_encounter(encounter_id)
+        imaging = self._serialize_imaging(study, inference, encounter_id)
+        self._audit.log_action(
+            user_id,
+            "IMAGING_REANALYZED",
+            "imaging_study",
+            str(study.id) if study else str(encounter_id),
+            {"encounter_id": str(encounter_id)},
+        )
+        return {"imaging": imaging}
+
+    def regenerate_synthesis(
+        self, encounter_id: uuid.UUID, user_id: uuid.UUID
+    ) -> dict[str, Any]:
+        """Rebuild global context and clinical synthesis for an existing encounter."""
+        encounter = self._encounter_dao.find_by_id(encounter_id)
+        if encounter is None:
+            raise NotFoundException("Encounter not found.")
+
+        patient = (
+            self._session.query(PatientModel)
+            .filter(PatientModel.id == encounter.patient_id)
+            .first()
+        )
+        nlp = self._document_dao.find_nlp_by_encounter(encounter_id)
+        study, inference = self._document_dao.find_imaging_by_encounter(encounter_id)
+        ocr_row = self._resolve_fused_ocr(encounter_id)
+        ocr = self._serialize_ocr(ocr_row) or {}
+        nlp_payload = self._serialize_nlp(nlp) or {}
+        imaging = self._serialize_imaging(study, inference, encounter_id)
+        structured = ocr.get("structured_data", {}) or {}
+        merged_text = (
+            structured.get("raw_text")
+            or structured.get("raw_text_preview")
+            or ""
+        )
+        correlation = structured.get("correlation", {})
+        triage_data = SymptomTriageService(self._session).get_session(encounter_id)
+
+        clinical_factors = self._factor_extractor.extract(
+            patient={
+                "full_name": patient.full_name if patient else "",
+                "date_of_birth": patient.date_of_birth if patient else None,
+                "gender": patient.gender if patient else None,
+            },
+            triage_data=triage_data,
+            merged_text=merged_text,
+            chief_complaint=encounter.chief_complaint,
+        )
+
+        imaging_findings = (imaging or {}).get("findings") or {}
+        partial_context = {
+            "clinical_factors": clinical_factors,
+            "labs": {"biomarkers": structured.get("biomarkers", [])},
+            "imaging_flags": {
+                name: data
+                for name, data in imaging_findings.items()
+                if isinstance(data, dict) and data.get("detected")
+            },
+        }
+        pattern_matches = self._pattern_engine.match(partial_context)
+
+        fused = {
+            "case_type": encounter.case_type,
+            "biomarkers": structured.get("biomarkers", []),
+            "lab_analysis": structured.get("lab_analysis", {}),
+            "document_manifest": structured.get("document_manifest", []),
+            "merged_text": merged_text,
+            "imaging": imaging or {"skipped": True, "findings": {}},
+            "triage": triage_data,
+            "clinical_factors": clinical_factors,
+            "pattern_matches": pattern_matches,
+            "nlp_entities": nlp_payload.get("entities", {}) or {},
+            "ocr_confidence": ocr.get("confidence", 0),
+            "nlp_confidence": nlp_payload.get("confidence", 0),
+        }
+        correlation = self._clinical_correlation.correlate(fused)
+        structured["correlation"] = correlation
+
+        global_context = self._global_context.build(
+            fused=fused,
+            nlp_result=nlp_payload,
+            imaging_result=imaging or {"skipped": True},
+            correlation=correlation,
+            triage_data=triage_data,
+            patient={
+                "full_name": patient.full_name if patient else "",
+                "external_id": patient.external_id if patient else "",
+                "date_of_birth": patient.date_of_birth if patient else None,
+                "gender": patient.gender if patient else None,
+            },
+            encounter={
+                "id": str(encounter_id),
+                "case_type": encounter.case_type,
+                "chief_complaint": encounter.chief_complaint,
+            },
+            pattern_matches=pattern_matches,
+        )
+
+        summary_result = self._summary.generate_summary(
+            encounter_id,
+            {
+                "file_type": encounter.case_type,
+                "case_type": encounter.case_type,
+                "ocr": {**ocr, "raw_text": merged_text},
+                "nlp": nlp_payload,
+                "imaging": imaging or {"skipped": True},
+                "correlation": correlation,
+                "triage": triage_data,
+                "global_context": global_context,
+            },
+        )
+        self._audit.log_action(
+            user_id,
+            "SYNTHESIS_REGENERATED",
+            "clinical_summary",
+            summary_result.get("summary_id", str(encounter_id)),
+            {"encounter_id": str(encounter_id)},
+        )
+        return {
+            "summary": summary_result,
+            "correlation": correlation,
+            "global_context": global_context,
+        }
 
     def get_source_image_path(self, encounter_id: uuid.UUID) -> tuple[str, str]:
         """Return validated source image path and MIME type for an encounter."""
@@ -829,10 +1178,26 @@ class IngestionService(BaseService):
         """Serialize summary ORM row."""
         if summary is None:
             return None
+        evidence = summary.evidence_sources if isinstance(summary.evidence_sources, dict) else {}
+        synthesis = evidence.get("clinical_synthesis") or {}
+        care_plan = evidence.get("care_plan") or synthesis.get("care_plan") or {}
         return {
             "id": str(summary.id),
             "summary_text": summary.summary_text,
             "status": summary.status,
             "reviewed_by": str(summary.reviewed_by) if summary.reviewed_by else None,
             "evidence_sources": summary.evidence_sources,
+            "clinical_synthesis": synthesis,
+            "care_plan": care_plan,
+            "clinical_factors": (evidence.get("global_context") or {}).get("clinical_factors"),
+            "patient_summary": synthesis.get("patient_summary"),
+            "physician_summary": synthesis.get("physician_summary"),
+            "clinical_factors_review": synthesis.get("clinical_factors_review"),
+            "leading_diagnosis": synthesis.get("leading_diagnosis"),
+            "differential": synthesis.get("differential", []),
+            "possible_diseases_report": synthesis.get("possible_diseases_report", []),
+            "root_cause_analysis": synthesis.get("root_cause_analysis"),
+            "correlation_narrative": synthesis.get("correlation_narrative"),
+            "recommended_workup": synthesis.get("recommended_workup", []),
+            "consult_recommendation": synthesis.get("consult_recommendation"),
         }
