@@ -2,10 +2,9 @@ import { useCallback, useEffect, useState } from "react";
 import { useDashboardData } from "../hooks/useDashboardData";
 import { clinicalApi } from "../api/clinicalApi";
 import { ErrorBanner } from "../components/ErrorBanner";
+import { PageTemplate } from "../components/layout/PageTemplate";
 import { ClinicalWorkspace } from "../components/workspace/ClinicalWorkspace";
 import { usePermissions } from "../hooks/usePermissions";
-import { BarVolumeChart } from "../charts/BarVolumeChart";
-import { LinePredictionsChart } from "../charts/LinePredictionsChart";
 
 export function DashboardPage() {
   const { loading, error, authExpired, dashboard, charts, alerts, retry } = useDashboardData();
@@ -58,7 +57,7 @@ export function DashboardPage() {
   const isAuthError = authExpired || encountersAuthExpired;
 
   return (
-    <div>
+    <PageTemplate title="Workspace" subtitle="Pending reviews, alerts, and recent patient reports.">
       <ErrorBanner
         message={showError}
         onRetry={isAuthError ? undefined : handleRetryAll}
@@ -70,32 +69,12 @@ export function DashboardPage() {
         encounters={encounters}
         alerts={alerts}
         pendingReviews={dashboard?.pending_reviews ?? 0}
+        charts={charts}
+        chartsLoading={loading}
         onAcknowledge={handleAcknowledge}
         acknowledgingId={acknowledgingId}
         canUpload={canUpload}
       />
-
-      <details className="cv-analytics-fold cv-panel cv-panel-pad" style={{ marginTop: "var(--cv-space-4)" }}>
-        <summary>Operations analytics</summary>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: "var(--cv-space-3)", marginTop: "var(--cv-space-3)" }}>
-          <div>
-            <h4 style={{ margin: "0 0 8px", fontSize: "var(--cv-text-sm)", color: "var(--cv-slate-500)" }}>Daily predictions</h4>
-            {pageLoading ? (
-              <div className="cv-skeleton" style={{ height: 180 }} />
-            ) : (
-              <LinePredictionsChart data={charts?.daily_predictions} loading={pageLoading} />
-            )}
-          </div>
-          <div>
-            <h4 style={{ margin: "0 0 8px", fontSize: "var(--cv-text-sm)", color: "var(--cv-slate-500)" }}>Weekly volume</h4>
-            {pageLoading ? (
-              <div className="cv-skeleton" style={{ height: 180 }} />
-            ) : (
-              <BarVolumeChart data={charts?.weekly_analysis_volume} loading={pageLoading} />
-            )}
-          </div>
-        </div>
-      </details>
-    </div>
+    </PageTemplate>
   );
 }

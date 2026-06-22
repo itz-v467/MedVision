@@ -1,89 +1,68 @@
 import { Link } from "react-router-dom";
 import { AppRoutes } from "../../enums/routes";
 import { plainStatus } from "../../utils/plainLanguage";
+import { MetricTile } from "../ui/MetricTile";
+import { EmptyState } from "../ui/EmptyState";
+import { ClinicalCard } from "../ui/ClinicalCard";
+import { OperationsAnalytics } from "./OperationsAnalytics";
+import { PendingReviewGrid } from "./PendingReviewGrid";
+
+const RECENT_PATIENT_LIMIT = 3;
+
+function isPendingReview(status) {
+  return status === "REVIEW_REQUIRED" || status === "PROCESSING";
+}
 
 export function ClinicalWorkspace({
   loading,
   encounters = [],
   alerts = [],
   pendingReviews = 0,
+  charts,
+  chartsLoading,
   onAcknowledge,
   acknowledgingId,
   canUpload,
 }) {
   const activeAlerts = alerts.filter((a) => !a.is_acknowledged);
   const criticalAlerts = activeAlerts.filter((a) => a.priority === "CRITICAL" || a.priority === "HIGH");
-  const reviewQueue = encounters.filter(
-    (e) => e.status === "PENDING_REVIEW" || e.status === "PROCESSING"
-  );
-  const recentCases = encounters.slice(0, 8);
+  const reviewQueue = encounters.filter((e) => isPendingReview(e.status));
+  const recentCases = encounters.slice(0, RECENT_PATIENT_LIMIT);
   const pendingCount = reviewQueue.length || pendingReviews;
 
   return (
     <div className="cv-workspace">
-      <header className="mv-welcome-header">
-        <h1>Workspace</h1>
-        <p>Pending reviews, alerts, and recent patient reports.</p>
-      </header>
-
-      <div className="cv-metrics" role="list">
-        <div className="cv-metric" role="listitem">
-          <span className="cv-metric-value">{loading ? "—" : pendingCount}</span>
-          <span className="cv-metric-label">Pending review</span>
-        </div>
-        <div className={`cv-metric${criticalAlerts.length ? " is-alert" : ""}`} role="listitem">
-          <span className="cv-metric-value">{loading ? "—" : criticalAlerts.length}</span>
-          <span className="cv-metric-label">Urgent alerts</span>
-        </div>
-        <div className="cv-metric" role="listitem">
-          <span className="cv-metric-value">{loading ? "—" : recentCases.length}</span>
-          <span className="cv-metric-label">Recent reports</span>
-        </div>
+      <div className="cv-metrics-row" role="list">
+        <MetricTile label="Pending review" value={loading ? "—" : pendingCount} />
+        <MetricTile
+          label="Urgent alerts"
+          value={loading ? "—" : criticalAlerts.length}
+          tone={criticalAlerts.length ? "alert" : "default"}
+        />
+        <MetricTile label="Recent reports" value={loading ? "—" : Math.min(encounters.length, RECENT_PATIENT_LIMIT)} />
+        <MetricTile label="Queue total" value={loading ? "—" : encounters.length} hint="All cases" />
       </div>
 
-      <div className="cv-workspace-grid">
-        <div style={{ display: "flex", flexDirection: "column", gap: "var(--cv-space-3)" }}>
-          <section className="cv-panel cv-panel-pad" aria-labelledby="review-queue-heading">
-            <div className="cv-panel-head">
-              <h2 id="review-queue-heading">Reports to review</h2>
-              <span className="cv-stat-inline">
-                {loading ? "Loading…" : `${pendingCount} in queue`}
-              </span>
-            </div>
-            {loading ? (
-              <div className="cv-skeleton" style={{ height: 200 }} />
-            ) : reviewQueue.length > 0 ? (
-              <ul className="cv-case-list">
-                {reviewQueue.map((enc) => (
-                  <CaseRow key={enc.id} encounter={enc} />
-                ))}
-              </ul>
-            ) : recentCases.length > 0 ? (
-              <>
-                <p className="mv-empty-hint">No pending reviews. Latest uploads:</p>
-                <ul className="cv-case-list">
-                  {recentCases.slice(0, 5).map((enc) => (
-                    <CaseRow key={enc.id} encounter={enc} />
-                  ))}
-                </ul>
-              </>
-            ) : (
-              <EmptyState
-                message="No reports yet. Upload a lab result or scan to get started."
-                action={canUpload ? { label: "Add first case", to: AppRoutes.UPLOAD } : null}
-              />
-            )}
-          </section>
+      <PendingReviewGrid items={reviewQueue} loading={loading} canUpload={canUpload} />
 
-          <section className="cv-panel cv-panel-pad" aria-labelledby="recent-heading">
-            <div className="cv-panel-head">
-              <h2 id="recent-heading">Recent patients</h2>
-              <Link to={AppRoutes.ENCOUNTERS} className="cv-btn cv-btn-ghost cv-btn-sm">
-                View all
-              </Link>
-            </div>
+      <div className="cv-workspace-layout">
+        <div className="cv-workspace-main">
+          <ClinicalCard
+            title="Recent patients"
+            action={
+              encounters.length > RECENT_PATIENT_LIMIT ? (
+                <Link to={AppRoutes.ENCOUNTERS} className="cv-btn cv-btn-ghost cv-btn-sm">
+                  View all ({encounters.length})
+                </Link>
+              ) : (
+                <Link to={AppRoutes.ENCOUNTERS} className="cv-btn cv-btn-ghost cv-btn-sm">
+                  View all
+                </Link>
+              )
+            }
+          >
             {loading ? (
-              <div className="cv-skeleton" style={{ height: 160 }} />
+              <div className="cv-skeleton" style={{ height: 120 }} />
             ) : recentCases.length > 0 ? (
               <ul className="cv-case-list">
                 {recentCases.map((enc) => (
@@ -93,15 +72,15 @@ export function ClinicalWorkspace({
             ) : (
               <EmptyState message="Patients will appear here after you upload reports." />
             )}
-          </section>
+          </ClinicalCard>
+
+          <OperationsAnalytics charts={charts} loading={chartsLoading ?? loading} />
         </div>
 
-        <aside style={{ display: "flex", flexDirection: "column", gap: "var(--cv-space-3)" }}>
-          <section className="cv-panel cv-panel-pad" aria-labelledby="alerts-heading">
-            <div className="cv-panel-head">
-              <h2 id="alerts-heading">Needs attention</h2>
-              <span className="cv-stat-inline">{loading ? "—" : criticalAlerts.length}</span>
-            </div>
+        <aside className="cv-workspace-aside">
+          <ClinicalCard title="Needs attention" action={
+            <span className="cv-stat-inline">{loading ? "—" : criticalAlerts.length}</span>
+          }>
             {loading ? (
               <div className="cv-skeleton" style={{ height: 120 }} />
             ) : criticalAlerts.length > 0 ? (
@@ -128,18 +107,17 @@ export function ClinicalWorkspace({
             ) : (
               <p className="mv-empty-hint">No urgent alerts.</p>
             )}
-          </section>
+          </ClinicalCard>
 
           {canUpload && (
-            <section className="cv-panel cv-panel-pad">
-              <h2 style={{ margin: "0 0 8px", fontSize: "0.9375rem", fontWeight: 600 }}>New report</h2>
+            <ClinicalCard title="New report">
               <p className="mv-empty-hint" style={{ marginBottom: 16 }}>
                 Upload a lab report, chest X-ray, or describe symptoms with the assistant.
               </p>
               <Link to={AppRoutes.UPLOAD} className="cv-btn cv-btn-primary cv-btn-block">
                 Upload
               </Link>
-            </section>
+            </ClinicalCard>
           )}
         </aside>
       </div>
@@ -169,18 +147,5 @@ function CaseRow({ encounter, compact = false }) {
         Open
       </Link>
     </li>
-  );
-}
-
-function EmptyState({ message, action }) {
-  return (
-    <div className="mv-empty-state">
-      <p>{message}</p>
-      {action && (
-        <Link to={action.to} className="cv-btn cv-btn-primary cv-btn-sm">
-          {action.label}
-        </Link>
-      )}
-    </div>
   );
 }

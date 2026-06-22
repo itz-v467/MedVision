@@ -11,16 +11,7 @@
   --mv-accent: #0f4c81;
 }
 
-.cv-app-shell {
-  grid-template-columns: var(--mv-sidebar-width) 1fr;
-  background: var(--cv-surface);
-}
-
-.cv-main {
-  padding: 32px 40px 48px;
-  max-width: 1080px;
-  background: var(--cv-surface);
-}
+/* Shell grid: see shell.css */
 
 /* ─── Sidebar ─── */
 .mv-sidebar {
@@ -102,7 +93,8 @@
 }
 
 /* Search */
-.mv-sidebar-search {
+.mv-sidebar-search,
+.cv-sidebar-search {
   position: relative;
   margin-bottom: 24px;
 }

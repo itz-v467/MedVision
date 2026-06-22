@@ -2,6 +2,8 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { clinicalApi } from "../api/clinicalApi";
 import { ErrorBanner } from "../components/ErrorBanner";
+import { PageTemplate } from "../components/layout/PageTemplate";
+import { ClinicalCard } from "../components/ui/ClinicalCard";
 import { PatientSearchBar } from "../components/patients/PatientSearchBar";
 import { Messages } from "../enums/messages";
 import { AppRoutes } from "../enums/routes";
@@ -13,6 +15,7 @@ export function EncountersPage() {
   const [loading, setLoading] = useState(true);
   const [searchParams, setSearchParams] = useSearchParams();
   const filterQ = searchParams.get("q") || "";
+  const filterStatus = searchParams.get("status") || "";
   const navigate = useNavigate();
 
   const load = useCallback(async () => {
@@ -33,14 +36,20 @@ export function EncountersPage() {
   }, [load]);
 
   const filtered = useMemo(() => {
-    if (!filterQ.trim()) return encounters;
+    let rows = encounters;
+    if (filterStatus === "pending") {
+      rows = rows.filter(
+        (e) => e.status === "REVIEW_REQUIRED" || e.status === "PROCESSING"
+      );
+    }
+    if (!filterQ.trim()) return rows;
     const q = filterQ.toLowerCase();
-    return encounters.filter(
+    return rows.filter(
       (e) =>
         e.patient_name?.toLowerCase().includes(q) ||
         e.patient_external_id?.toLowerCase().includes(q)
     );
-  }, [encounters, filterQ]);
+  }, [encounters, filterQ, filterStatus]);
 
   const handleSelectPatient = (patient) => {
     const match = encounters.find(
@@ -56,17 +65,24 @@ export function EncountersPage() {
   };
 
   return (
-    <div>
-      <header className="mv-welcome-header" style={{ marginBottom: 24 }}>
-        <h1>Reports</h1>
-        <p>Search by patient name or ID, or browse all uploaded documents.</p>
-      </header>
-
+    <PageTemplate
+      title="Reports"
+      subtitle="Search by patient name or ID, or browse all uploaded documents."
+    >
       <ErrorBanner message={error} onRetry={load} />
 
-      <div className="cv-panel cv-panel-pad" style={{ marginBottom: 24 }}>
+      <ClinicalCard>
         <PatientSearchBar onSelectPatient={handleSelectPatient} />
-      </div>
+      </ClinicalCard>
+
+      {filterStatus === "pending" && (
+        <div className="mv-filter-banner">
+          Showing <strong>pending review</strong> only
+          <button type="button" className="cv-btn cv-btn-ghost cv-btn-sm" onClick={() => setSearchParams({})}>
+            Clear filter
+          </button>
+        </div>
+      )}
 
       {filterQ && (
         <div className="mv-filter-banner">
@@ -80,10 +96,10 @@ export function EncountersPage() {
       {loading ? (
         <div className="cv-skeleton" style={{ height: 320 }} />
       ) : (
-        <div className="cv-panel cv-panel-pad">
+        <ClinicalCard>
           <EncountersTable encounters={filtered} onDeleted={load} />
-        </div>
+        </ClinicalCard>
       )}
-    </div>
+    </PageTemplate>
   );
 }

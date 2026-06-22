@@ -102,6 +102,8 @@ export class HttpClient {
         message = "This action is not available — please restart the backend (docker compose up --build).";
       } else if (response.status === 403) {
         message = payload.message || "You do not have permission for this action.";
+      } else if (response.status === 413) {
+        message = "File is too large for upload. Maximum size is 50 MB per file.";
       } else if (response.status === 500) {
         message = payload.message || "Server error — please try again.";
       }

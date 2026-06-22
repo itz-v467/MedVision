@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Link, useNavigate, useParams } from "react-router-dom";
+import { useNavigate, useParams } from "react-router-dom";
 import { clinicalApi } from "../api/clinicalApi";
 import { ErrorBanner } from "../components/ErrorBanner";
 import { ClinicalSignalsList } from "../components/ClinicalSignalsList";
@@ -7,6 +7,10 @@ import { ExtractedTextPanel } from "../components/ExtractedTextPanel";
 import { LabResultsTable } from "../components/LabResultsTable";
 import { PatientTimeline } from "../components/PatientTimeline.jsx";
 import { ClinicalFindingsPanel } from "../components/review/ClinicalFindingsPanel";
+import { StickyPatientContextBar } from "../components/review/StickyPatientContextBar";
+import { CaseActionRail } from "../components/review/CaseActionRail";
+import { CaseMetricsRail } from "../components/review/CaseMetricsRail";
+import { CaseSectionAccordion } from "../components/ui/CaseSectionAccordion";
 import { CorrelationCards } from "../components/review/CorrelationCards";
 import { SymptomTriagePanel } from "../components/review/SymptomTriagePanel";
 import { EvidenceChain } from "../components/review/EvidenceChain";
@@ -17,7 +21,7 @@ import { Messages } from "../enums/messages";
 import { usePermissions } from "../hooks/usePermissions";
 import { enrichBiomarkers } from "../utils/labInterpretation";
 import { buildEvidenceSources } from "../utils/evidenceFormat";
-import { plainDocType, UI_LABELS } from "../utils/plainLanguage";
+import { plainDocType } from "../utils/plainLanguage";
 
 function caseTypeOf(detail) {
   return (
@@ -267,38 +271,84 @@ export function ReviewPage() {
     ? new Date(detail.encounter.created_at).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })
     : "—";
   const alerts = detail?.alerts || [];
+  const defaultOpen = [];
+  if (derived?.showLab) defaultOpen.push("labs");
+  if (derived?.showImaging) defaultOpen.push("imaging");
+
+  const accordionSections = [
+    derived?.showLab && {
+      id: "labs",
+      title: "Laboratory results",
+      badge: `${derived.biomarkers.length} values`,
+      content: <LabResultsTable biomarkers={derived.biomarkers} variant="clinical" />,
+    },
+    derived?.showImaging && {
+      id: "imaging",
+      title: "Chest imaging",
+      content: (
+        <PremiumImagingViewer
+          imaging={detail.imaging}
+          fileName={derived.xrayFile}
+          onReanalyze={handleReanalyzeImaging}
+          reanalyzing={reanalyzingImaging}
+        />
+      ),
+    },
+    detail?.triage?.session && {
+      id: "triage",
+      title: "Symptom triage",
+      content: (
+        <SymptomTriagePanel
+          triage={detail.triage}
+          encounterId={encounterId}
+          canReview={canReview}
+          onUpdated={load}
+        />
+      ),
+    },
+    detail?.correlation && {
+      id: "correlation",
+      title: "Cross-modal correlation",
+      content: (
+        <CorrelationCards
+          correlation={detail.correlation}
+          narrative={detail?.summary?.correlation_narrative}
+        />
+      ),
+    },
+    derived?.sources.length > 0 && {
+      id: "evidence",
+      title: "Supporting evidence",
+      content: (
+        <EvidenceChain
+          sources={derived.sources}
+          activeId={evidenceId || derived.sources[0]?.id}
+          onSelect={setEvidenceId}
+          detail={detail}
+        />
+      ),
+    },
+  ].filter(Boolean);
 
   return (
     <article className="cv-case">
-      <header className="cv-case-header">
-        <div className="cv-case-patient">
-          <div className="cv-case-avatar" aria-hidden="true">{initials}</div>
-          <div>
-            <h1 className="cv-case-name">{patient?.full_name || "Unknown patient"}</h1>
-            <div className="cv-case-meta-row">
-              <span>ID {patient?.external_id || "—"}</span>
-              {patient?.date_of_birth && <span>Age {patient.date_of_birth}</span>}
-              {patient?.gender && <span>{patient.gender}</span>}
-              {derived?.badge && <span className="cv-case-badge">{derived.badge}</span>}
-              {!derived?.badge && derived?.primaryDocType && (
-                <span>{plainDocType(derived.primaryDocType)}</span>
-              )}
-              <span>Updated {updated}</span>
-            </div>
-          </div>
-        </div>
-        <div style={{ display: "flex", alignItems: "center", gap: "var(--cv-space-2)", flexWrap: "wrap" }}>
-          <span className={`cv-priority cv-priority-${derived?.risk || "low"}`}>
-            {derived?.risk || "low"} priority
-          </span>
-          <Link to={AppRoutes.ENCOUNTERS} className="cv-btn cv-btn-ghost cv-btn-sm">
-            ← All cases
-          </Link>
-          <button type="button" className="cv-btn cv-btn-danger cv-btn-sm" onClick={handleDelete}>
-            {UI_LABELS.deleteRecord}
-          </button>
-        </div>
-      </header>
+      <StickyPatientContextBar
+        patient={patient}
+        initials={initials}
+        caseBadge={derived?.badge || plainDocType(derived?.primaryDocType)}
+        risk={derived?.risk}
+        updated={updated}
+      />
+
+      <CaseActionRail
+        canReview={canReview}
+        isFinalized={detail?.summary?.status === "FINALIZED"}
+        onRegenerate={handleRegenerateSynthesis}
+        regenerating={regeneratingSynthesis}
+        onFinalize={handleFinalize}
+        finalizing={finalizing}
+        onDelete={handleDelete}
+      />
 
       <IdentityCard validation={detail?.name_validation} />
 
@@ -311,123 +361,67 @@ export function ReviewPage() {
         </div>
       )}
 
-      <ClinicalFindingsPanel
-        summaryText={detail?.summary?.summary_text}
-        synthesis={detail?.summary?.clinical_synthesis || detail?.summary}
-        labAnalysis={derived?.labAnalysis}
-        docType={derived?.primaryDocType}
-        imaging={detail?.imaging}
-        correlation={detail?.correlation}
-        confidence={derived?.confidence}
-        isFinalized={detail?.summary?.status === "FINALIZED"}
-        canReview={canReview}
-        onFinalize={handleFinalize}
-        finalizing={finalizing}
-        onRegenerateSynthesis={handleRegenerateSynthesis}
-        regeneratingSynthesis={regeneratingSynthesis}
-        clinicalFactors={
-          detail?.summary?.clinical_factors
-          || detail?.summary?.evidence_sources?.global_context?.clinical_factors
-        }
-        carePlan={detail?.summary?.care_plan}
-        possibleDiseasesReport={detail?.summary?.possible_diseases_report || []}
-        consultRecommendation={detail?.summary?.consult_recommendation}
-        consultConfig={detail?.consult?.config}
-        consultRequest={detail?.consult?.request}
-        documents={detail?.documents || []}
-        patternMatches={
-          detail?.summary?.evidence_sources?.global_context?.pattern_matches?.pattern_matches
-          || []
-        }
-        onApproveCarePlan={canReview ? handleApproveCarePlan : undefined}
-        approvingCarePlan={approvingCarePlan}
-        onRequestConsult={handleRequestConsult}
-        requestingConsult={requestingConsult}
-      />
-
-      <CorrelationCards
-        correlation={detail?.correlation}
-        narrative={detail?.summary?.correlation_narrative}
-      />
-
-      <SymptomTriagePanel
-        triage={detail?.triage}
-        encounterId={encounterId}
-        canReview={canReview}
-        onUpdated={load}
-      />
-
-      {derived?.showLab && (
-        <section className="cv-lab-panel" aria-labelledby="lab-results-heading">
-          <LabResultsTable biomarkers={derived.biomarkers} variant="clinical" />
-        </section>
-      )}
-
-      {derived?.sources.length > 0 && (
-        <section className="cv-section" aria-labelledby="evidence-heading">
-          <h2 className="cv-section-title" id="evidence-heading">Supporting evidence</h2>
-          <p className="cv-section-sub">
-            Each step explains what the system reviewed — in clinical language, not raw technical data.
-          </p>
-          <EvidenceChain
-            sources={derived.sources}
-            activeId={evidenceId || derived.sources[0]?.id}
-            onSelect={setEvidenceId}
-            detail={detail}
-          />
-        </section>
-      )}
-
-      {derived?.showImaging && (
-        <PremiumImagingViewer
-          imaging={detail.imaging}
-          fileName={derived.xrayFile}
-          onReanalyze={handleReanalyzeImaging}
-          reanalyzing={reanalyzingImaging}
+      <div className="cv-case-workspace-grid">
+        <ClinicalFindingsPanel
+          embedded
+          summaryText={detail?.summary?.summary_text}
+          synthesis={detail?.summary?.clinical_synthesis || detail?.summary}
+          labAnalysis={derived?.labAnalysis}
+          docType={derived?.primaryDocType}
+          imaging={detail?.imaging}
+          correlation={detail?.correlation}
+          confidence={derived?.confidence}
+          isFinalized={detail?.summary?.status === "FINALIZED"}
+          canReview={canReview}
+          onFinalize={handleFinalize}
+          finalizing={finalizing}
+          clinicalFactors={
+            detail?.summary?.clinical_factors
+            || detail?.summary?.evidence_sources?.global_context?.clinical_factors
+          }
+          carePlan={detail?.summary?.care_plan}
+          possibleDiseasesReport={detail?.summary?.possible_diseases_report || []}
+          consultRecommendation={detail?.summary?.consult_recommendation}
+          consultConfig={detail?.consult?.config}
+          consultRequest={detail?.consult?.request}
+          documents={detail?.documents || []}
+          patternMatches={
+            detail?.summary?.evidence_sources?.global_context?.pattern_matches?.pattern_matches
+            || []
+          }
+          onApproveCarePlan={canReview ? handleApproveCarePlan : undefined}
+          approvingCarePlan={approvingCarePlan}
+          onRequestConsult={handleRequestConsult}
+          requestingConsult={requestingConsult}
         />
-      )}
+
+        <CaseMetricsRail
+          confidence={derived?.confidence}
+          docType={derived?.primaryDocType}
+          alerts={alerts}
+          consultRecommendation={detail?.summary?.consult_recommendation}
+          consultConfig={detail?.consult?.config}
+          consultRequest={detail?.consult?.request}
+          onRequestConsult={handleRequestConsult}
+          requestingConsult={requestingConsult}
+          onAcknowledge={handleAcknowledge}
+          acknowledgingId={acknowledgingId}
+        />
+      </div>
+
+      <CaseSectionAccordion sections={accordionSections} defaultOpenIds={defaultOpen} />
 
       {derived?.manifest.length > 1 && (
-        <section className="cv-section" aria-labelledby="documents-heading">
-          <h2 className="cv-section-title" id="documents-heading">Documents in this case</h2>
+        <section className="cv-ui-card is-padded" aria-labelledby="documents-heading">
+          <h2 className="cv-ui-card-title" id="documents-heading">Documents in this case</h2>
           <ul className="cv-document-manifest">
             {derived.manifest.map((doc) => (
               <li key={doc.document_id || doc.file_name}>
                 <strong>{plainDocType(doc.file_type)}</strong>
                 <span>{doc.file_name}</span>
-                {typeof doc.biomarker_count === "number" && doc.file_type === "lab_report" && (
-                  <span>{doc.biomarker_count} lab value(s)</span>
-                )}
               </li>
             ))}
           </ul>
-        </section>
-      )}
-
-      {alerts.length > 0 && (
-        <section className="cv-panel cv-panel-pad">
-          <h2 className="cv-section-title" style={{ fontSize: "var(--cv-text-base)" }}>Clinical alerts</h2>
-          {alerts.map((alert) => (
-            <div
-              key={alert.id}
-              className={`cv-alert-item${alert.priority === "MODERATE" ? " cv-alert-item-moderate" : ""}`}
-              style={{ marginBottom: 8 }}
-            >
-              <p className="cv-alert-title">[{alert.priority}] {alert.title}</p>
-              <p className="cv-alert-msg">{alert.message}</p>
-              {!alert.is_acknowledged && (
-                <button
-                  type="button"
-                  className="cv-btn cv-btn-sm cv-btn-secondary"
-                  style={{ marginTop: 8 }}
-                  onClick={() => handleAcknowledge(alert.id)}
-                  disabled={acknowledgingId === alert.id}
-                >
-                  {acknowledgingId === alert.id ? "Saving…" : "Acknowledge"}
-                </button>
-              )}
-            </div>
-          ))}
         </section>
       )}
 
@@ -436,8 +430,8 @@ export function ReviewPage() {
         <div className="cv-admin-body">
           {detail?.pipeline?.steps?.length > 0 && (
             <div>
-              <strong style={{ fontSize: "var(--cv-text-sm)" }}>Processing log</strong>
-              <ul style={{ margin: "8px 0 0", paddingLeft: 18, fontSize: "var(--cv-text-sm)", color: "var(--cv-slate-500)" }}>
+              <strong className="cv-admin-log-title">Processing log</strong>
+              <ul className="cv-admin-log-list">
                 {detail.pipeline.steps.map((s) => (
                   <li key={s.id}>{s.label}: {s.summary || s.status}</li>
                 ))}

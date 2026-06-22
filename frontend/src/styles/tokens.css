@@ -1,0 +1,142 @@
+/**
+ * MedVision Clinical Command Center — design tokens
+ * Warm-neutral physician-first palette
+ */
+
+:root {
+  /* Surfaces */
+  --cv-background: #fbf9f8;
+  --cv-on-background: #1b1c1c;
+  --cv-surface: #fbf9f8;
+  --cv-surface-container-lowest: #ffffff;
+  --cv-surface-container-low: #f6f3f3;
+  --cv-surface-container: #f0eded;
+  --cv-surface-container-high: #eae7e7;
+  --cv-surface-container-highest: #e4e2e2;
+  --cv-surface-variant: #e4e2e2;
+  --cv-surface-elevated: #ffffff;
+  --cv-on-surface: #1b1c1c;
+  --cv-on-surface-variant: #434749;
+  --cv-outline: #73787a;
+  --cv-outline-variant: #c3c7c9;
+  --cv-border: var(--cv-outline-variant);
+
+  /* Brand & navigation — sage clinical palette */
+  --cv-primary: #4a7a73;
+  --cv-on-primary: #ffffff;
+  --cv-primary-hover: #3d665f;
+  --cv-primary-container: #2f4f4b;
+  --cv-on-primary-container: #b8d4cf;
+  --cv-inverse-primary: #d4ebe6;
+  --cv-surface-tint: #5d8f87;
+  --cv-primary-muted: rgba(74, 122, 115, 0.1);
+  --cv-secondary: #5b5f60;
+  --cv-on-secondary: #ffffff;
+  --cv-secondary-container: #dde0e1;
+
+  /* Semantic */
+  --cv-error: #ba1a1a;
+  --cv-on-error: #ffffff;
+  --cv-error-container: #ffdad6;
+  --cv-on-error-container: #93000a;
+  --cv-critical: var(--cv-error);
+  --cv-critical-bg: var(--cv-error-container);
+  --cv-critical-border: #f5c2c0;
+
+  --cv-warning: #e65100;
+  --cv-warning-bg: #fff3e0;
+  --cv-warning-border: #ffcc80;
+  --cv-on-warning-container: #bf360c;
+
+  --cv-success: #2e7d32;
+  --cv-success-bg: #e8f5e9;
+  --cv-success-border: #a5d6a7;
+  --cv-on-success-container: #1b5e20;
+
+  --cv-info: #1565c0;
+  --cv-info-bg: #e3f2fd;
+  --cv-info-border: #90caf9;
+  --cv-on-info-container: #0d47a1;
+
+  /* Legacy slate aliases */
+  --cv-slate-900: #1b1c1c;
+  --cv-slate-700: #434749;
+  --cv-slate-600: #5b5f60;
+  --cv-slate-500: #73787a;
+  --cv-slate-400: #9aa0a3;
+  --cv-slate-200: #e4e2e2;
+  --cv-slate-100: #f6f3f3;
+  --cv-slate-50: #fbf9f8;
+
+  /* Typography */
+  --cv-font: 'Plus Jakarta Sans', 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+  --cv-font-display: 'Plus Jakarta Sans', var(--cv-font);
+  --cv-font-tagline: 'Cormorant Garamond', Georgia, 'Times New Roman', serif;
+
+  /* Sidebar — premium dark clinical (high contrast) */
+  --cv-sidebar-bg: #1a2f2d;
+  --cv-sidebar-bg-end: #0f1f1e;
+  --cv-sidebar-border: rgba(255, 255, 255, 0.1);
+  --cv-sidebar-text: #f0f7f6;
+  --cv-sidebar-text-muted: #94b0ab;
+  --cv-sidebar-accent: #6db5a8;
+  --cv-sidebar-accent-strong: #9ed9ce;
+  --cv-sidebar-nav-active-bg: rgba(109, 181, 168, 0.2);
+  --cv-sidebar-nav-hover-bg: rgba(255, 255, 255, 0.07);
+  --cv-sidebar-surface: rgba(0, 0, 0, 0.25);
+  --cv-sidebar-shadow: 4px 0 32px rgba(15, 31, 30, 0.45);
+  --cv-font-mono: 'IBM Plex Mono', ui-monospace, monospace;
+  --cv-text-display: 1.5rem;
+  --cv-text-lg: 1.125rem;
+  --cv-text-base: 0.875rem;
+  --cv-text-sm: 0.8125rem;
+  --cv-text-xs: 0.75rem;
+  --cv-text-xl: 1.25rem;
+  --cv-text-2xl: 1.5rem;
+  --cv-text-3xl: 1.875rem;
+
+  /* Spacing */
+  --cv-space-1: 8px;
+  --cv-space-2: 16px;
+  --cv-space-3: 24px;
+  --cv-space-4: 32px;
+  --cv-space-5: 48px;
+  --cv-space-6: 64px;
+
+  /* Shell */
+  --cv-sidebar-width: 260px;
+  --cv-sidebar-width-collapsed: 76px;
+  --cv-topbar-height: 56px;
+  --cv-content-max: 1200px;
+  --cv-table-row-height: 40px;
+
+  /* Radius */
+  --cv-radius-sm: 2px;
+  --cv-radius: 4px;
+  --cv-radius-md: 6px;
+  --cv-radius-lg: 8px;
+  --cv-radius-xl: 12px;
+  --cv-radius-full: 9999px;
+
+  /* Elevation */
+  --cv-shadow-sm: 0 1px 2px rgba(27, 28, 28, 0.04);
+  --cv-shadow-md: 0 2px 8px rgba(27, 28, 28, 0.06);
+  --cv-shadow-lg: 0 8px 24px rgba(27, 28, 28, 0.08);
+
+  /* Motion */
+  --cv-ease: cubic-bezier(0.4, 0, 0.2, 1);
+  --cv-duration: 180ms;
+}
+
+body {
+  background: var(--cv-background) !important;
+  font-family: var(--cv-font);
+  font-size: var(--cv-text-base);
+  color: var(--cv-on-surface);
+  line-height: 1.43;
+}
+
+:focus-visible {
+  outline: 2px solid var(--cv-surface-tint);
+  outline-offset: 2px;
+}

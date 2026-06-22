@@ -1,100 +1,12 @@
 /**
- * MedVision Clinical Design System
- * Enterprise CDSS — Apple meets Mayo Clinic
- *
- * Tokens: color, typography, spacing (8px scale), elevation, motion
+ * MedVision Clinical Design System — component styles
+ * Tokens live in tokens.css
  */
 
-:root {
-  /* Color — trust & restraint */
-  --cv-primary: #0f4c81;
-  --cv-primary-hover: #0a3a63;
-  --cv-primary-muted: rgba(15, 76, 129, 0.08);
-  --cv-slate-900: #0f172a;
-  --cv-slate-700: #334155;
-  --cv-slate-500: #64748b;
-  --cv-slate-400: #94a3b8;
-  --cv-slate-200: #e2e8f0;
-  --cv-slate-100: #f1f5f9;
-  --cv-surface: #fafbfc;
-  --cv-surface-elevated: #ffffff;
-  --cv-border: rgba(15, 23, 42, 0.08);
-  --cv-success: #15803d;
-  --cv-success-bg: #f0fdf4;
-  --cv-warning: #b45309;
-  --cv-warning-bg: #fffbeb;
-  --cv-critical: #b91c1c;
-  --cv-critical-bg: #fef2f2;
+/* Legacy body rules kept for compat; tokens.css owns :root */
+/* App shell + sidebar layout live in shell.css only */
 
-  /* Spacing — 8px scale */
-  --cv-space-1: 8px;
-  --cv-space-2: 16px;
-  --cv-space-3: 24px;
-  --cv-space-4: 32px;
-  --cv-space-5: 48px;
-  --cv-space-6: 64px;
-
-  /* Typography */
-  --cv-font: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
-  --cv-text-xs: 0.75rem;
-  --cv-text-sm: 0.875rem;
-  --cv-text-base: 1rem;
-  --cv-text-lg: 1.125rem;
-  --cv-text-xl: 1.25rem;
-  --cv-text-2xl: 1.5rem;
-  --cv-text-3xl: 1.875rem;
-
-  /* Elevation */
-  --cv-shadow-sm: 0 1px 2px rgba(15, 23, 42, 0.03);
-  --cv-shadow-md: 0 2px 8px rgba(15, 23, 42, 0.05);
-  --cv-shadow-lg: 0 8px 24px rgba(15, 23, 42, 0.06);
-
-  /* Radius */
-  --cv-radius-sm: 6px;
-  --cv-radius-md: 8px;
-  --cv-radius-lg: 10px;
-
-  /* Motion */
-  --cv-ease: cubic-bezier(0.4, 0, 0.2, 1);
-  --cv-duration: 200ms;
-
-  /* Glass (selective) */
-  --cv-glass: rgba(255, 255, 255, 0.72);
-  --cv-glass-border: rgba(255, 255, 255, 0.4);
-  --cv-glass-blur: blur(12px);
-}
-
-body {
-  background: var(--cv-surface) !important;
-  font-family: var(--cv-font);
-  color: var(--cv-slate-900);
-  line-height: 1.5;
-}
-
-/* ─── App shell ─── */
-.cv-app-shell {
-  display: grid;
-  grid-template-columns: 272px 1fr;
-  min-height: 100vh;
-}
-
-.cv-main {
-  padding: var(--cv-space-4) var(--cv-space-5);
-  max-width: 1200px;
-  width: 100%;
-}
-
-/* ─── Clinical sidebar ─── */
-.cv-sidebar {
-  display: flex;
-  flex-direction: column;
-  justify-content: space-between;
-  min-height: 100vh;
-  background: linear-gradient(180deg, #0c1222 0%, #0f172a 55%, #111827 100%);
-  border-right: 1px solid rgba(255, 255, 255, 0.06);
-  padding: var(--cv-space-3) var(--cv-space-2);
-  color: #e2e8f0;
-}
+/* ─── Clinical sidebar (legacy link styles; layout in shell.css) ─── */
 
 .cv-sidebar-top {
   flex: 1;
@@ -329,68 +241,6 @@ body {
   font-size: 0.625rem;
   line-height: 1.45;
   color: rgba(100, 116, 139, 0.9);
-}
-
-@media (max-width: 900px) {
-  .cv-app-shell {
-    grid-template-columns: 1fr;
-  }
-
-  .cv-sidebar {
-    min-height: auto;
-    flex-direction: row;
-    flex-wrap: wrap;
-    padding: var(--cv-space-2);
-  }
-
-  .cv-sidebar-top {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: var(--cv-space-2);
-    flex: 1;
-  }
-
-  .cv-sidebar-brand {
-    margin-bottom: 0;
-  }
-
-  .cv-sidebar-section {
-    margin-bottom: 0;
-  }
-
-  .cv-sidebar-section-label {
-    display: none;
-  }
-
-  .cv-sidebar-nav {
-    flex-direction: row;
-    flex-wrap: wrap;
-  }
-
-  .cv-sidebar-link-desc,
-  .cv-sidebar-compliance {
-    display: none;
-  }
-
-  .cv-sidebar-footer {
-    border-top: none;
-    padding-top: 0;
-    margin-top: 0;
-    display: flex;
-    align-items: center;
-    gap: 8px;
-  }
-
-  .cv-sidebar-user {
-    margin-bottom: 0;
-    padding: 4px;
-  }
-
-  .cv-sidebar-signout {
-    width: auto;
-    padding: 8px 12px;
-  }
 }
 
 /* ─── Clinical workspace ─── */
@@ -1063,6 +913,8 @@ body {
   background: var(--cv-slate-100);
   color: var(--cv-slate-700);
 }
+
+.cv-patient-search-badge.is-match {
   background: var(--cv-primary-muted);
   color: var(--cv-primary);
   padding: 1px 6px;

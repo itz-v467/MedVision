@@ -1,13 +1,36 @@
-# MedVision — Enterprise Clinical AI Platform
+# MedVision — Clinical AI Platform
+
+**intelligence that cares**
 
 AI-powered multimodal clinical decision support for radiology, lab OCR, medical NLP, explainable imaging, and physician-reviewed summaries.
 
 ## Architecture
 
 - **Backend**: FastAPI modular monolith (`routes → controller → service → dao → db`)
-- **Frontend**: React + Vite enterprise dashboard
+- **Frontend**: React + Vite clinical workspace UI
 - **Data**: PostgreSQL (+ **pgvector** for RAG), Redis
 - **AI**: Isolated service layer with singleton model loader
+
+## UI highlights
+
+| Feature | Description |
+|---------|-------------|
+| **Icon-only sidebar** | Only the MedVision logo shows on the left; click to open the navigation drawer |
+| **Adaptive layout** | Main content expands to full width when the menu is closed |
+| **Physician triage** | Workspace shows **pending review cards** — one click opens the case review screen |
+| **Patient search** | Available on the **Reports** page only (not in the sidebar) |
+| **Sage clinical palette** | Soft teal/sage accents for a calm clinical UI |
+| **Centered login** | Minimal sign-in with logo and tagline *intelligence that cares* |
+
+### Physician workflow
+
+1. Sign in → land on **Workspace**
+2. Review **Reports pending review** cards at the top (status `REVIEW_REQUIRED` or `PROCESSING`)
+3. Click a card → enter unified case review
+4. Use **Reports** page to search patients by name or MV number
+5. Click the **MedVision icon** (left edge) to open navigation: Workspace, New case, Reports
+
+Sidebar open/closed state is remembered in `localStorage`.
 
 ## Engineering standards
 
@@ -27,21 +50,30 @@ Or install dev tools: `pip install -r backend/requirements-dev.txt`
 
 ## Quick Start
 
+### Docker (recommended)
+
+```bash
+docker compose up --build
+```
+
+- **UI**: http://localhost:8080
+- **API**: http://localhost:5000 (OpenAPI: http://localhost:5000/docs)
+
+Default admin (after seed):
+
+- Email: `admin@medvision.health`
+- Password: `Admin@12345`
+
 ### Local development
 
 ```powershell
-# Backend (PowerShell — from project root MedVision)
-cd C:\Users\vroy4\Desktop\MedVision
+# Backend (from project root)
 python -m venv .venv
 .venv\Scripts\activate
 pip install -r backend\requirements.txt
 python scripts\seed_database.py
 $env:PYTHONPATH = "."
 uvicorn backend.app:create_app --factory --reload --port 5000
-```
-
-> **Note:** `set PYTHONPATH=.` is CMD only. In PowerShell use `$env:PYTHONPATH = "."`
-> Or run seed without PYTHONPATH: `python scripts\seed_database.py`
 
 # Frontend
 cd frontend
@@ -49,16 +81,7 @@ npm install
 npm run dev
 ```
 
-Default admin (after seed):
-
-- Email: `admin@medvision.health`
-- Password: `Admin@12345`
-
-### Docker
-
-```bash
-docker compose up --build
-```
+> **Note:** In PowerShell use `$env:PYTHONPATH = "."` (not `set PYTHONPATH=.`).
 
 The backend Docker image installs `requirements-ml.txt` so TorchXRayVision runs in containers. For local dev without ML deps, the imaging client uses a deterministic fallback scorer.
 
@@ -66,9 +89,9 @@ The backend Docker image installs `requirements-ml.txt` so TorchXRayVision runs 
 
 Upload lab report + chest X-ray in one intake session:
 
-- **UI**: Patient intake → add documents per slot → one physician review page
+- **UI**: New case → add documents per slot → unified physician review
 - **API**: `POST /api/clinical/cases` with multipart `files[]` and `file_types[]`
-- **Review**: unified summary, lab table, X-ray viewer with anomaly box, correlation cards
+- **Review**: unified summary, lab table, X-ray viewer, correlation cards, care plan
 
 ### Backfill X-ray anomaly regions (existing encounters)
 
@@ -77,9 +100,6 @@ $env:PYTHONPATH = "."
 python scripts\backfill_imaging_regions.py
 python scripts\backfill_imaging_regions.py --dry-run
 ```
-
-- API: http://localhost:5000 (OpenAPI docs: http://localhost:5000/docs)
-- UI: http://localhost:8080
 
 ## API Overview
 
@@ -90,8 +110,8 @@ python scripts\backfill_imaging_regions.py --dry-run
 | `GET /api/stats/dashboard` | Live dashboard metrics |
 | `GET /api/stats/charts` | Chart.js datasets |
 | `POST /api/clinical/upload` | Single-file AI workflow (backward compatible) |
-| `POST /api/clinical/cases` | **Unified case** — multiple documents (lab + X-ray + note) → one encounter |
-| `GET /api/clinical/encounters/{id}` | Full review payload (`case_type`, `correlation`, `imaging.regions`) |
+| `POST /api/clinical/cases` | **Unified case** — multiple documents → one encounter |
+| `GET /api/clinical/encounters/{id}` | Full review payload |
 
 ## Data layer (PostgreSQL + vectors)
 
@@ -100,7 +120,6 @@ python scripts\backfill_imaging_regions.py --dry-run
 | **PostgreSQL** | Users, encounters, clinical results, audit | Docker `pgvector/pgvector:pg16`, Alembic migrations |
 | **pgvector** | RAG embeddings, similarity search | `document_embeddings` table, `VectorStoreClient` |
 | **Redis** | Cache, future job queue | Docker Compose |
-| **SQLite** | Optional local dev only | No vector search |
 
 Start Postgres + pgvector:
 

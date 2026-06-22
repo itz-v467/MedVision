@@ -5,6 +5,7 @@ import { PossibleDiseasesReport } from "./PossibleDiseasesReport";
 import { CarePlanPanel } from "./CarePlanPanel";
 import { ConsultDoctorCard } from "./ConsultDoctorCard";
 import { StructuredSummary } from "./StructuredSummary";
+import { ClinicalTabs } from "../ui/ClinicalTabs";
 
 const TABS = [
   { id: "patient", label: "For you" },
@@ -40,6 +41,7 @@ export function ClinicalFindingsPanel({
   approvingCarePlan = false,
   onRequestConsult,
   requestingConsult = false,
+  embedded = false,
 }) {
   const [tab, setTab] = useState("patient");
   const formatted = formatClinicalSummary(summaryText, labAnalysis, { docType, imaging, synthesis });
@@ -59,45 +61,37 @@ export function ClinicalFindingsPanel({
   const carePlanApproved = (carePlan?.status || synthesis?.care_plan?.status) === "approved";
 
   return (
-    <section className="cv-findings-primary" aria-labelledby="findings-heading">
+    <section className={`cv-findings-primary${embedded ? " is-embedded" : ""}`} aria-labelledby="findings-heading">
       <div className="cv-findings-hero">
-        <div className="cv-synthesis-header">
-          <h2 id="findings-heading">Clinical case synthesis</h2>
-          <p className="cv-section-sub" style={{ margin: "4px 0 0" }}>
-            Unified review of symptoms, labs, and imaging — like a doctor&apos;s first read.
-          </p>
-          <p className="cv-synthesis-disclaimer">
-            AI-assisted synthesis only — not a diagnosis. A licensed physician must review all findings.
-          </p>
-          {onRegenerateSynthesis && (
-            <button
-              type="button"
-              className="cv-btn cv-btn-secondary"
-              style={{ marginTop: "10px" }}
-              onClick={onRegenerateSynthesis}
-              disabled={regeneratingSynthesis}
-            >
-              {regeneratingSynthesis ? "Refreshing…" : "Refresh case synthesis"}
-            </button>
-          )}
-        </div>
+        {!embedded && (
+          <div className="cv-synthesis-header">
+            <h2 id="findings-heading">Clinical case synthesis</h2>
+            <p className="cv-section-sub cv-synthesis-sub">
+              Unified review of symptoms, labs, and imaging.
+            </p>
+            <p className="cv-synthesis-disclaimer">
+              AI-assisted synthesis only — not a diagnosis. A licensed physician must review all findings.
+            </p>
+            {onRegenerateSynthesis && (
+              <button
+                type="button"
+                className="cv-btn cv-btn-secondary"
+                onClick={onRegenerateSynthesis}
+                disabled={regeneratingSynthesis}
+              >
+                {regeneratingSynthesis ? "Refreshing…" : "Refresh case synthesis"}
+              </button>
+            )}
+          </div>
+        )}
+
+        {embedded && (
+          <h2 id="findings-heading" className="cv-ui-card-title">Clinical synthesis</h2>
+        )}
 
         <ClinicalFactorCard factors={clinicalFactors} documents={documents} />
 
-        <div className="cv-synthesis-tabs" role="tablist" aria-label="Summary views">
-          {TABS.map((item) => (
-            <button
-              key={item.id}
-              type="button"
-              role="tab"
-              aria-selected={tab === item.id}
-              className={`cv-synthesis-tab${tab === item.id ? " is-active" : ""}`}
-              onClick={() => setTab(item.id)}
-            >
-              {item.label}
-            </button>
-          ))}
-        </div>
+        <ClinicalTabs tabs={TABS} activeId={tab} onChange={setTab} ariaLabel="Summary views" />
 
         {tab === "patient" && (
           <div className="cv-synthesis-panel" role="tabpanel">
@@ -269,7 +263,7 @@ export function ClinicalFindingsPanel({
           </div>
         )}
 
-        {canReview && !isFinalized && tab !== "next" && (
+        {canReview && !isFinalized && tab !== "next" && !embedded && (
           <button
             type="button"
             className="cv-btn cv-btn-primary cv-btn-block"
@@ -287,6 +281,7 @@ export function ClinicalFindingsPanel({
         )}
       </div>
 
+      {!embedded && (
       <aside>
         {pct != null && (
           <div className="cv-confidence-card">
@@ -301,6 +296,7 @@ export function ClinicalFindingsPanel({
           </div>
         )}
       </aside>
+      )}
     </section>
   );
 }

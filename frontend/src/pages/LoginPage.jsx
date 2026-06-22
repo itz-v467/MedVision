@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { AppRoutes } from "../enums/routes";
 import { useAuth } from "../hooks/useAuth";
+import { MedVisionBrand } from "../components/brand/MedVisionBrand";
 
 export function LoginPage() {
   const { login } = useAuth();
@@ -10,6 +11,7 @@ export function LoginPage() {
   const sessionExpired = location.state?.from === "session_expired";
   const [email, setEmail] = useState("admin@medvision.health");
   const [password, setPassword] = useState("Admin@12345");
+  const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
@@ -29,66 +31,80 @@ export function LoginPage() {
 
   return (
     <div className="login-page">
-      <div className="login-shell">
-        {sessionExpired && !error && (
-          <div className="cv-error-banner cv-error-banner-auth login-session-banner">
-            <div className="cv-error-banner-text">
+      <aside className="login-brand-panel" aria-label="MedVision">
+        <MedVisionBrand variant="login" />
+        <p className="login-brand-lede">
+          Physician-first clinical decision support — unified review of symptoms,
+          labs, and imaging in one workspace.
+        </p>
+      </aside>
+
+      <main className="login-form-panel">
+        <div className="login-shell">
+          {sessionExpired && !error && (
+            <div className="login-banner login-banner-warning" role="status">
               Your session ended. Please sign in again.
             </div>
-          </div>
-        )}
-
-        <div className="login-brand">
-          <div className="login-logo" aria-hidden="true">MV</div>
-          <div>
-            <h1 className="login-brand-title">MedVision</h1>
-            <p className="login-brand-sub">Clinical decision support</p>
-          </div>
-        </div>
-
-        <form onSubmit={handleSubmit} className="login-card">
-          <div className="login-card-head">
-            <h2>Sign in</h2>
-            <p>Use your hospital credentials to access the workspace.</p>
-          </div>
-
-          {error && (
-            <div className="error-banner login-error">{error}</div>
           )}
 
-          <label htmlFor="email-input">
-            Email
-            <input
-              id="email-input"
-              type="email"
-              autoComplete="email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              placeholder="physician@hospital.org"
-              required
-            />
-          </label>
+          <form onSubmit={handleSubmit} className="login-card" noValidate>
+            <header className="login-card-head">
+              <h2>Sign in</h2>
+              <p>Use your hospital credentials to continue.</p>
+            </header>
 
-          <label htmlFor="password-input">
-            Password
-            <input
-              id="password-input"
-              type="password"
-              autoComplete="current-password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              placeholder="Enter password"
-              required
-            />
-          </label>
+            {error && (
+              <div className="login-banner login-banner-error" role="alert">
+                {error}
+              </div>
+            )}
 
-          <button type="submit" disabled={loading}>
-            {loading ? "Signing in…" : "Sign in"}
-          </button>
-        </form>
+            <div className="login-fields">
+              <label className="login-field" htmlFor="email-input">
+                <span className="login-field-label">Email</span>
+                <input
+                  id="email-input"
+                  type="email"
+                  autoComplete="email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  placeholder="physician@hospital.org"
+                  required
+                />
+              </label>
 
-        <p className="login-footer">MedVision CDSS</p>
-      </div>
+              <label className="login-field" htmlFor="password-input">
+                <span className="login-field-label">Password</span>
+                <div className="login-password-wrap">
+                  <input
+                    id="password-input"
+                    type={showPassword ? "text" : "password"}
+                    autoComplete="current-password"
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    placeholder="Enter password"
+                    required
+                  />
+                  <button
+                    type="button"
+                    className="login-password-toggle"
+                    onClick={() => setShowPassword((prev) => !prev)}
+                    aria-label={showPassword ? "Hide password" : "Show password"}
+                  >
+                    {showPassword ? "Hide" : "Show"}
+                  </button>
+                </div>
+              </label>
+            </div>
+
+            <button type="submit" className="login-submit" disabled={loading}>
+              {loading ? "Signing in…" : "Sign in"}
+            </button>
+          </form>
+
+          <p className="login-footer-note">Protected access · Authorized staff only</p>
+        </div>
+      </main>
     </div>
   );
 }
